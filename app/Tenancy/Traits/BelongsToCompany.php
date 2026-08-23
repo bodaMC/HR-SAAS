@@ -25,6 +25,30 @@ trait BelongsToCompany
 
             $model->company_id = $tenantContext->id();
         });
+
+        static::updating(function (Model $model) {
+            if ($model->isDirty('company_id')) {
+                throw new \InvalidArgumentException('Tenant company_id cannot be mutated.');
+            }
+        });
+    }
+
+    /**
+     * Override fill() to intercept company_id in mass-assignment payloads on existing models.
+     *
+     * When company_id is not in $fillable, Eloquent's fill() silently ignores it without
+     * ever calling setAttribute(), so the setAttribute guard never fires. This override
+     * provides a defence-in-depth catch for that code path.
+     *
+     * @param  array<string, mixed>  $attributes
+     */
+    public function fill(array $attributes): static
+    {
+        if ($this->exists && array_key_exists('company_id', $attributes)) {
+            throw new \InvalidArgumentException('Tenant company_id cannot be mutated.');
+        }
+
+        return parent::fill($attributes);
     }
 
     /**
