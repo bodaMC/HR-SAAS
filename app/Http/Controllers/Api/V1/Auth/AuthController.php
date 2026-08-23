@@ -39,38 +39,42 @@ class AuthController extends Controller
         }
 
         return DB::transaction(function () use ($validated, $slug) {
-            // 1. Create the Company
-            $company = Company::create([
-                'name' => $validated['company_name'],
-                'slug' => $slug,
-                'is_active' => true,
-            ]);
+            try {
+                // 1. Create the Company
+                $company = Company::create([
+                    'name' => $validated['company_name'],
+                    'slug' => $slug,
+                    'is_active' => true,
+                ]);
 
-            // 2. Establish TenantContext before creating User so BelongsToCompany hook succeeds
-            app(TenantContext::class)->set($company);
+                // 2. Establish TenantContext before creating User so BelongsToCompany hook succeeds
+                app(TenantContext::class)->set($company);
 
-            // 3. Create the Owner User with forced server-side attributes
-            $user = User::create([
-                'name' => $validated['name'],
-                'email' => $validated['email'],
-                'password' => $validated['password'],
-                'phone' => $validated['phone'] ?? null,
-                'role' => UserRole::Owner,
-                'is_active' => true,
-            ]);
+                // 3. Create the Owner User with forced server-side attributes
+                $user = User::create([
+                    'name' => $validated['name'],
+                    'email' => $validated['email'],
+                    'password' => $validated['password'],
+                    'phone' => $validated['phone'] ?? null,
+                    'role' => UserRole::Owner,
+                    'is_active' => true,
+                ]);
 
-            // 4. Issue Sanctum token with configurable expiration
-            $expiration = config('sanctum.expiration');
-            $expiresAt = $expiration ? now()->addMinutes((int) $expiration) : null;
-            $token = $user->createToken('orbit-auth-token', ['*'], $expiresAt)->plainTextToken;
+                // 4. Issue Sanctum token with configurable expiration
+                $expiration = config('sanctum.expiration');
+                $expiresAt = $expiration ? now()->addMinutes((int) $expiration) : null;
+                $token = $user->createToken('orbit-auth-token', ['*'], $expiresAt)->plainTextToken;
 
-            return response()->json([
-                'message' => 'Company and owner registered successfully.',
-                'token' => $token,
-                'token_type' => 'Bearer',
-                'user' => new UserResource($user->load('company')),
-                'company' => new CompanyResource($company),
-            ], Response::HTTP_CREATED);
+                return response()->json([
+                    'message' => 'Company and owner registered successfully.',
+                    'token' => $token,
+                    'token_type' => 'Bearer',
+                    'user' => new UserResource($user->load('company')),
+                    'company' => new CompanyResource($company),
+                ], Response::HTTP_CREATED);
+            } finally {
+                app(TenantContext::class)->clear();
+            }
         });
     }
 
