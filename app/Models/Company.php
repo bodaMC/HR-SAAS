@@ -53,4 +53,28 @@ class Company extends Model
     {
         return $this->hasMany(User::class);
     }
+
+    /**
+     * Get the departments associated with the company.
+     */
+    public function departments(): HasMany
+    {
+        return $this->hasMany(Department::class);
+    }
+
+    /**
+     * Get the job titles associated with the company.
+     */
+    public function jobTitles(): HasMany
+    {
+        return $this->hasMany(JobTitle::class);
+    }
+
+    /**
+     * Get the employees associated with the company.
+     */
+    public function employees(): HasMany
+    {
+        return $this->hasMany(Employee::class);
+    }
 }
