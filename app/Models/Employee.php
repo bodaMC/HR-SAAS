@@ -5,11 +5,14 @@ namespace App\Models;
 use App\Enums\EmploymentStatus;
 use App\Enums\Gender;
 use App\Tenancy\Traits\BelongsToCompany;
+use Carbon\Carbon;
 use Database\Factories\EmployeeFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Str;
 
@@ -43,6 +46,13 @@ class Employee extends Model
         'job_title_id',
         'manager_id',
         'user_id',
+        'team_leader_id',
+        'is_disabled',
+        'insurance_years',
+        'is_hod',
+        'is_team_leader',
+        'is_project_engineer',
+        'is_ceo',
     ];
 
     /**
@@ -64,6 +74,12 @@ class Employee extends Model
      */
     protected $attributes = [
         'employment_status' => EmploymentStatus::Active,
+        'is_disabled' => false,
+        'insurance_years' => 0.00,
+        'is_hod' => false,
+        'is_team_leader' => false,
+        'is_project_engineer' => false,
+        'is_ceo' => false,
     ];
 
     /**
@@ -79,6 +95,12 @@ class Employee extends Model
             'termination_date' => 'date',
             'employment_status' => EmploymentStatus::class,
             'gender' => Gender::class,
+            'is_disabled' => 'boolean',
+            'insurance_years' => 'decimal:2',
+            'is_hod' => 'boolean',
+            'is_team_leader' => 'boolean',
+            'is_project_engineer' => 'boolean',
+            'is_ceo' => 'boolean',
         ];
     }
 
@@ -208,5 +230,90 @@ class Employee extends Model
         }
 
         return $subordinateIds;
+    }
+
+    public function teamLeader(): BelongsTo
+    {
+        return $this->belongsTo(Employee::class, 'team_leader_id');
+    }
+
+    public function projects(): BelongsToMany
+    {
+        return $this->belongsToMany(Project::class, 'employee_projects')
+            ->withPivot('is_active')
+            ->withTimestamps();
+    }
+
+    public function leaveAllocations(): HasMany
+    {
+        return $this->hasMany(LeaveAllocation::class);
+    }
+
+    public function casualLeaveTrackers(): HasMany
+    {
+        return $this->hasMany(CasualLeaveTracker::class);
+    }
+
+    public function sickLeaveTrackers(): HasMany
+    {
+        return $this->hasMany(SickLeaveTracker::class);
+    }
+
+    public function leaveRequests(): HasMany
+    {
+        return $this->hasMany(LeaveRequest::class);
+    }
+
+    public function permissionMonthlyBalances(): HasMany
+    {
+        return $this->hasMany(PermissionMonthlyBalance::class);
+    }
+
+    public function permissionRequests(): HasMany
+    {
+        return $this->hasMany(PermissionRequest::class);
+    }
+
+    public function compensatoryBalance(): HasOne
+    {
+        return $this->hasOne(CompensatoryBalance::class);
+    }
+
+    public function compensatoryLogs(): HasMany
+    {
+        return $this->hasMany(CompensatoryLog::class);
+    }
+
+    public function getAgeAt(Carbon|string $date): int
+    {
+        if (! $this->date_of_birth) {
+            return 0;
+        }
+
+        $carbonDate = is_string($date) ? Carbon::parse($date) : $date;
+
+        return (int) $this->date_of_birth->diffInYears($carbonDate);
+    }
+
+    public function getTenureYearsAt(Carbon|string $date): float
+    {
+        if (! $this->hire_date) {
+            return 0.0;
+        }
+
+        $carbonDate = is_string($date) ? Carbon::parse($date) : $date;
+
+        return (float) round($this->hire_date->diffInDays($carbonDate) / 365.25, 2);
+    }
+
+    public function isAbsentOn(Carbon|string $date): bool
+    {
+        $carbonDate = is_string($date) ? Carbon::parse($date)->format('Y-m-d') : $date->format('Y-m-d');
+
+        return $this->leaveRequests()
+            ->where('status', 'approved')
+            ->whereDate('start_date', '<=', $carbonDate)
+            ->whereDate('end_date', '>=', $carbonDate)
+            ->exists();
     }
 }

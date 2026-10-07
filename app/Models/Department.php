@@ -28,6 +28,7 @@ class Department extends Model
         'name',
         'description',
         'is_active',
+        'hod_employee_id',
     ];
 
     /**
@@ -72,5 +73,13 @@ class Department extends Model
     public function employees(): HasMany
     {
         return $this->hasMany(Employee::class);
+    }
+
+    /**
+     * Get the HOD (Head of Department) employee.
+     */
+    public function hodEmployee(): BelongsTo
+    {
+        return $this->belongsTo(Employee::class, 'hod_employee_id');
     }
 }

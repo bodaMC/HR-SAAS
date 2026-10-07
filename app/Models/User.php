@@ -8,6 +8,7 @@ use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -65,7 +66,18 @@ class User extends Authenticatable
             'password' => 'hashed',
             'is_active' => 'boolean',
             'role' => UserRole::class,
+            'is_super_admin' => 'boolean',
         ];
+    }
+
+    /**
+     * Check if user is the single protected system Super Admin.
+     */
+    public function isSuperAdmin(): bool
+    {
+        $superAdminEmail = config('app.super_admin_email', 'superadmin@orbit.test');
+
+        return (bool) $this->is_super_admin || $this->email === $superAdminEmail;
     }
 
     /**
@@ -82,5 +94,13 @@ class User extends Authenticatable
     public function employee(): HasOne
     {
         return $this->hasOne(Employee::class);
+    }
+
+    /**
+     * Get notifications for the user.
+     */
+    public function notifications(): HasMany
+    {
+        return $this->hasMany(Notification::class);
     }
 }

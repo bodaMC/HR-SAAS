@@ -5,6 +5,7 @@ namespace App\Models;
 use Database\Factories\CompanyFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Str;
@@ -76,5 +77,53 @@ class Company extends Model
     public function employees(): HasMany
     {
         return $this->hasMany(Employee::class);
+    }
+
+    /**
+     * Get the CEO employee of the company.
+     */
+    public function ceoEmployee(): BelongsTo
+    {
+        return $this->belongsTo(Employee::class, 'ceo_employee_id');
+    }
+
+    /**
+     * Get projects of the company.
+     */
+    public function projects(): HasMany
+    {
+        return $this->hasMany(Project::class);
+    }
+
+    /**
+     * Get leave types of the company.
+     */
+    public function leaveTypes(): HasMany
+    {
+        return $this->hasMany(LeaveType::class);
+    }
+
+    /**
+     * Get work schedules of the company.
+     */
+    public function workSchedules(): HasMany
+    {
+        return $this->hasMany(CompanyWorkSchedule::class);
+    }
+
+    /**
+     * Get active work schedule of the company.
+     */
+    public function activeWorkSchedule(): ?CompanyWorkSchedule
+    {
+        return $this->workSchedules()->where('is_active', true)->first();
+    }
+
+    /**
+     * Get holidays of the company.
+     */
+    public function holidays(): HasMany
+    {
+        return $this->hasMany(CompanyHoliday::class);
     }
 }
