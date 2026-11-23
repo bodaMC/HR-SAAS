@@ -75,9 +75,9 @@ class User extends Authenticatable
      */
     public function isSuperAdmin(): bool
     {
-        $superAdminEmail = config('app.super_admin_email', 'superadmin@orbit.test');
-
-        return (bool) $this->is_super_admin || $this->email === $superAdminEmail;
+        // System privilege is explicitly provisioned by trusted server-side operators.
+        // Email addresses and tenant roles must never confer system authority.
+        return (bool) $this->is_super_admin;
     }
 
     /**
