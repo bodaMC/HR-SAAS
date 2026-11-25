@@ -5,6 +5,8 @@ namespace App\Http\Requests\Api\V1\Employees;
 use App\Enums\EmploymentStatus;
 use App\Enums\Gender;
 use App\Models\Employee;
+use App\Rules\ValidNationalId;
+use App\Support\NationalId;
 use App\Tenancy\TenantContext;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
@@ -20,6 +22,17 @@ class UpdateEmployeeRequest extends FormRequest
         $employee = $this->route('employee');
 
         return $this->user()->can('update', $employee);
+    }
+
+    /**
+     * Normalize the national ID (Arabic/Western digits, whitespace, empty to
+     * NULL) before validation so rules and storage see one canonical value.
+     */
+    protected function prepareForValidation(): void
+    {
+        if ($this->exists('national_id') && is_scalar($this->input('national_id'))) {
+            $this->merge(['national_id' => NationalId::normalize($this->input('national_id'))]);
+        }
     }
 
     /**
@@ -62,7 +75,7 @@ class UpdateEmployeeRequest extends FormRequest
             'phone' => ['nullable', 'string', 'max:50'],
             'date_of_birth' => ['nullable', 'date', 'before:today'],
             'gender' => ['nullable', Rule::enum(Gender::class)],
-            'national_id' => ['nullable', 'string', 'max:100'],
+            'national_id' => ['nullable', 'string', 'max:100', new ValidNationalId($tenantId, $employee instanceof Employee ? $employee->id : null)],
             'hire_date' => ['nullable', 'date'],
             'termination_date' => ['nullable', 'date', 'after_or_equal:hire_date'],
             'employment_status' => ['nullable', Rule::enum(EmploymentStatus::class)],

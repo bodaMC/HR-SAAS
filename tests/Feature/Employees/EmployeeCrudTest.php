@@ -32,7 +32,7 @@ test('owner and admin can create, read, update, and soft delete an employee', fu
             'phone' => '+15551234567',
             'date_of_birth' => '1990-05-15',
             'gender' => 'female',
-            'national_id' => 'NAT-998877',
+            'national_id' => '29001011234567',
             'hire_date' => '2024-01-10',
             'employment_status' => 'active',
             'department_id' => $department->id,

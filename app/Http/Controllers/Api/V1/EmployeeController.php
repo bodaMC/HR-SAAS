@@ -3,13 +3,14 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\V1\Employees\IndexEmployeesRequest;
 use App\Http\Requests\Api\V1\Employees\StoreEmployeeRequest;
 use App\Http\Requests\Api\V1\Employees\UpdateEmployeeRequest;
 use App\Http\Resources\Api\V1\EmployeeResource;
 use App\Models\Employee;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpFoundation\Response;
 
 class EmployeeController extends Controller
@@ -17,7 +18,7 @@ class EmployeeController extends Controller
     /**
      * Display a listing of employees for the active company.
      */
-    public function index(Request $request): AnonymousResourceCollection
+    public function index(IndexEmployeesRequest $request): AnonymousResourceCollection
     {
         $this->authorize('viewAny', Employee::class);
 
@@ -40,16 +41,20 @@ class EmployeeController extends Controller
         }
 
         if ($request->filled('search')) {
-            $search = $request->input('search');
-            $query->where(function ($q) use ($search) {
-                $q->where('first_name', 'ilike', "%{$search}%")
-                    ->orWhere('last_name', 'ilike', "%{$search}%")
-                    ->orWhere('employee_number', 'ilike', "%{$search}%")
-                    ->orWhere('email', 'ilike', "%{$search}%");
+            // Escape LIKE wildcards so "%" and "_" match literally, and also
+            // match the full name ("first last") typed as one phrase.
+            $term = trim((string) $request->input('search'));
+            $like = '%'.mb_strtolower(addcslashes($term, '\\%_')).'%';
+            $query->where(function ($q) use ($like) {
+                $q->whereRaw("LOWER(first_name) LIKE ? ESCAPE '\\'", [$like])
+                    ->orWhereRaw("LOWER(last_name) LIKE ? ESCAPE '\\'", [$like])
+                    ->orWhereRaw("LOWER(first_name || ' ' || last_name) LIKE ? ESCAPE '\\'", [$like])
+                    ->orWhereRaw("LOWER(employee_number) LIKE ? ESCAPE '\\'", [$like])
+                    ->orWhereRaw("LOWER(email) LIKE ? ESCAPE '\\'", [$like]);
             });
         }
 
-        $employees = $query->orderBy('first_name')->orderBy('last_name')->get();
+        $employees = $query->orderBy('first_name')->orderBy('last_name')->orderBy('id')->get();
 
         return EmployeeResource::collection($employees);
     }
@@ -59,7 +64,7 @@ class EmployeeController extends Controller
      */
     public function store(StoreEmployeeRequest $request): JsonResponse
     {
-        $employee = Employee::create($request->validated());
+        $employee = DB::transaction(fn () => Employee::create($request->validated()));
 
         return (new EmployeeResource($employee->load(['department', 'jobTitle', 'manager', 'user'])))
             ->response()
@@ -81,7 +86,7 @@ class EmployeeController extends Controller
      */
     public function update(UpdateEmployeeRequest $request, Employee $employee): EmployeeResource
     {
-        $employee->update($request->validated());
+        DB::transaction(fn () => $employee->update($request->validated()));
 
         return new EmployeeResource($employee->load(['department', 'jobTitle', 'manager', 'user']));
     }

@@ -54,7 +54,7 @@ test('personal data privacy: owner and admin can view personal data for all comp
         'phone' => '+1999888777',
         'date_of_birth' => '1985-12-01',
         'gender' => Gender::Male,
-        'national_id' => 'EGY-123456789',
+        'national_id' => '29001011234567',
     ]);
     app(TenantContext::class)->clear();
 
@@ -68,7 +68,7 @@ test('personal data privacy: owner and admin can view personal data for all comp
     expect($data)->toHaveKey('phone', '+1999888777')
         ->and($data)->toHaveKey('date_of_birth', '1985-12-01')
         ->and($data)->toHaveKey('gender', 'male')
-        ->and($data)->toHaveKey('national_id', 'EGY-123456789');
+        ->and($data)->toHaveKey('national_id', '29001011234567');
 })->with([
     'Owner' => UserRole::Owner,
     'Admin' => UserRole::Admin,
