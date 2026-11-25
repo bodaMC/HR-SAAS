@@ -10,6 +10,7 @@ use App\Http\Resources\Api\V1\CompanyResource;
 use App\Http\Resources\Api\V1\UserResource;
 use App\Models\Company;
 use App\Models\User;
+use App\Rbac\PermissionResolver;
 use App\Tenancy\TenantContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -142,9 +143,19 @@ class AuthController extends Controller
     {
         $user = $request->user();
 
+        $roles = DB::table('user_roles as ur')->join('roles as r', 'r.id', '=', 'ur.role_id')
+            ->where('ur.user_id', $user->id)->orderBy('r.name')->get(['r.id', 'r.key', 'r.name', 'r.name_ar', 'r.is_system'])
+            ->map(fn ($r) => ['id' => $r->id, 'key' => $r->key, 'name' => $r->name, 'name_ar' => $r->name_ar, 'is_system' => (bool) $r->is_system])->all();
+
+        // Server-verified capabilities, recomputed on every request and never cached.
         return response()->json([
             'user' => new UserResource($user->load('company')),
             'company' => new CompanyResource($user->company),
-        ], Response::HTTP_OK);
+            'access' => [
+                'permissions' => PermissionResolver::for($user),
+                'roles' => $roles,
+                'is_platform_admin' => $user->isSuperAdmin(),
+            ],
+        ], Response::HTTP_OK)->header('Cache-Control', 'private, no-store');
     }
 }

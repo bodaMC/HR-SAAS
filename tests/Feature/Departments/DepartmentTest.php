@@ -13,7 +13,7 @@ test('owner and admin can list and create departments', function (UserRole $role
     $company = Company::factory()->create();
     app(TenantContext::class)->set($company);
 
-    $user = User::factory()->create(['role' => $role]);
+    $user = User::factory()->hr()->create(['role' => $role]);
     $token = $user->createToken('test-token')->plainTextToken;
     app(TenantContext::class)->clear();
 
@@ -47,7 +47,7 @@ test('owner and admin can list and create departments', function (UserRole $role
     'Admin' => UserRole::Admin,
 ]);
 
-test('manager and employee can view but cannot create, update, or delete departments', function (UserRole $role) {
+test('manager and employee without explicit permissions cannot view, create, update, or delete departments', function (UserRole $role) {
     $company = Company::factory()->create();
     app(TenantContext::class)->set($company);
 
@@ -57,11 +57,10 @@ test('manager and employee can view but cannot create, update, or delete departm
     $department = Department::factory()->create(['name' => 'Engineering']);
     app(TenantContext::class)->clear();
 
-    // 1. View is allowed
+    // 1. Phase 3.2: viewing the management module requires departments.view (intentional change)
     $viewResponse = $this->withHeader('Authorization', 'Bearer '.$token)
         ->getJson('/api/v1/departments/'.$department->id);
-    $viewResponse->assertStatus(200)
-        ->assertJsonPath('data.name', 'Engineering');
+    $viewResponse->assertStatus(403);
 
     $this->app['auth']->forgetGuards();
 
@@ -94,7 +93,7 @@ test('department name must be unique within the same company only', function () 
 
     // Create "Marketing" in Company A
     app(TenantContext::class)->set($companyA);
-    $ownerA = User::factory()->owner()->create();
+    $ownerA = User::factory()->owner()->hr()->create();
     $tokenA = $ownerA->createToken('token-a')->plainTextToken;
     Department::factory()->create(['name' => 'Marketing']);
     app(TenantContext::class)->clear();
@@ -109,7 +108,7 @@ test('department name must be unique within the same company only', function () 
 
     // Company B can create "Marketing" with no conflict
     app(TenantContext::class)->set($companyB);
-    $ownerB = User::factory()->owner()->create();
+    $ownerB = User::factory()->owner()->hr()->create();
     $tokenB = $ownerB->createToken('token-b')->plainTextToken;
     app(TenantContext::class)->clear();
 
@@ -124,13 +123,13 @@ test('department soft delete works and maintains tenant isolation', function () 
     $companyB = Company::factory()->create();
 
     app(TenantContext::class)->set($companyA);
-    $ownerA = User::factory()->owner()->create();
+    $ownerA = User::factory()->owner()->hr()->create();
     $tokenA = $ownerA->createToken('token-a')->plainTextToken;
     $deptA = Department::factory()->create(['name' => 'Dept A']);
     app(TenantContext::class)->clear();
 
     app(TenantContext::class)->set($companyB);
-    $ownerB = User::factory()->owner()->create();
+    $ownerB = User::factory()->owner()->hr()->create();
     $tokenB = $ownerB->createToken('token-b')->plainTextToken;
     $deptB = Department::factory()->create(['name' => 'Dept B']);
     app(TenantContext::class)->clear();
@@ -154,7 +153,7 @@ test('department soft delete works and maintains tenant isolation', function () 
 test('department name remains permanently reserved after soft deletion', function () {
     $company = Company::factory()->create();
     app(TenantContext::class)->set($company);
-    $owner = User::factory()->owner()->create();
+    $owner = User::factory()->owner()->hr()->create();
     $token = $owner->createToken('token')->plainTextToken;
     $dept = Department::factory()->create(['name' => 'Accounting']);
     app(TenantContext::class)->clear();

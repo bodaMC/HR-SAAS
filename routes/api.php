@@ -1,5 +1,7 @@
 <?php
 
+use App\Http\Controllers\Api\V1\Access\AccessUserController;
+use App\Http\Controllers\Api\V1\Access\RoleController;
 use App\Http\Controllers\Api\V1\AuditLogController;
 use App\Http\Controllers\Api\V1\Auth\AuthController;
 use App\Http\Controllers\Api\V1\CompanyHolidayController;
@@ -84,7 +86,20 @@ Route::prefix('v1')->group(function () {
         Route::post('notifications/{notification}/read', [NotificationController::class, 'markAsRead']);
         Route::post('notifications/read-all', [NotificationController::class, 'markAllAsRead']);
 
-        // Phase 8 — Audit Logs (Owner/Admin only)
+        // Phase 3.2 — Roles & Permissions (authorization is permission-based, enforced in the service layer)
+        Route::prefix('access')->group(function () {
+            Route::get('permissions', [RoleController::class, 'permissions']);
+            Route::get('roles', [RoleController::class, 'index']);
+            Route::post('roles', [RoleController::class, 'store']);
+            Route::get('roles/{role}', [RoleController::class, 'show']);
+            Route::put('roles/{role}', [RoleController::class, 'update']);
+            Route::delete('roles/{role}', [RoleController::class, 'destroy']);
+            Route::get('users', [AccessUserController::class, 'index']);
+            Route::get('users/{user}/permissions', [AccessUserController::class, 'permissions'])->whereNumber('user');
+            Route::put('users/{user}/roles', [AccessUserController::class, 'syncRoles'])->whereNumber('user');
+        });
+
+        // Phase 8 — Audit Logs (requires audit_logs.view)
         Route::get('audit-logs', [AuditLogController::class, 'index']);
     });
 

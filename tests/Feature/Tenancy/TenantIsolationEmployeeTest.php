@@ -16,7 +16,7 @@ test('cross-tenant route model binding returns 404 for departments, job titles, 
 
     // Company A User
     app(TenantContext::class)->set($companyA);
-    $ownerA = User::factory()->owner()->create();
+    $ownerA = User::factory()->owner()->hr()->create();
     $tokenA = $ownerA->createToken('token-a')->plainTextToken;
     app(TenantContext::class)->clear();
 
@@ -52,7 +52,7 @@ test('employee company_id and uuid cannot be spoofed or mutated via API or Eloqu
     $companyB = Company::factory()->create();
 
     app(TenantContext::class)->set($companyA);
-    $ownerA = User::factory()->owner()->create();
+    $ownerA = User::factory()->owner()->hr()->create();
     $tokenA = $ownerA->createToken('token-a')->plainTextToken;
 
     // 1. Attempt creating employee with spoofed company_id and uuid

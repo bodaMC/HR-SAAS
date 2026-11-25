@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Rbac\PermissionResolver;
 use App\Tenancy\TenantContext;
 use Closure;
 use Illuminate\Http\Request;
@@ -14,6 +15,9 @@ class EnsureTenantContext
      */
     public function handle(Request $request, Closure $next): Response
     {
+        // Never reuse capabilities resolved for an earlier request in this process.
+        PermissionResolver::flush();
+
         $user = $request->user();
 
         // 1. Verify User exists

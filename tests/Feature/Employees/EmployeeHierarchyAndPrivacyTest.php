@@ -14,7 +14,7 @@ test('manager hierarchy prevents self-manager and cycles', function () {
     $company = Company::factory()->create();
     app(TenantContext::class)->set($company);
 
-    $owner = User::factory()->owner()->create();
+    $owner = User::factory()->owner()->hr()->create();
     $token = $owner->createToken('test-token')->plainTextToken;
 
     $manager = Employee::factory()->create(['first_name' => 'Boss']);
@@ -47,7 +47,7 @@ test('personal data privacy: owner and admin can view personal data for all comp
     $company = Company::factory()->create();
     app(TenantContext::class)->set($company);
 
-    $adminUser = User::factory()->create(['role' => $role]);
+    $adminUser = User::factory()->hr()->create(['role' => $role]);
     $token = $adminUser->createToken('admin-token')->plainTextToken;
 
     $employee = Employee::factory()->create([
@@ -117,16 +117,11 @@ test('personal data privacy: employee can view own personal data but not another
     $otherResponse = $this->withHeader('Authorization', 'Bearer '.$tokenA)
         ->getJson('/api/v1/employees/'.$employeeB->id);
 
-    $otherResponse->assertStatus(200);
-    $otherData = $otherResponse->json('data');
-    expect($otherData['first_name'])->toBe($employeeB->first_name)
-        ->and($otherData)->not->toHaveKey('phone')
-        ->and($otherData)->not->toHaveKey('date_of_birth')
-        ->and($otherData)->not->toHaveKey('gender')
-        ->and($otherData)->not->toHaveKey('national_id');
+    // Phase 3.2: another employee's record needs employees.view (intentional change)
+    $otherResponse->assertStatus(403);
 });
 
-test('personal data privacy: manager can view personal data only for employees in their management hierarchy', function () {
+test('personal data privacy: a manager has no hierarchy based directory access without an explicit permission', function () {
     $company = Company::factory()->create();
     app(TenantContext::class)->set($company);
 
@@ -163,33 +158,21 @@ test('personal data privacy: manager can view personal data only for employees i
     ]);
     app(TenantContext::class)->clear();
 
-    // 1. Manager views direct subordinate -> personal data IS present
-    $subResp = $this->withHeader('Authorization', 'Bearer '.$managerToken)
-        ->getJson('/api/v1/employees/'.$subordinate->id);
-    $subResp->assertStatus(200);
-    expect($subResp->json('data'))->toHaveKey('phone', '+133333333')
-        ->and($subResp->json('data'))->toHaveKey('national_id', 'NAT-SUB-1');
+    // Phase 3.2: a Manager role or reporting line grants no directory access (intentional change).
+    foreach ([$subordinate, $nestedSubordinate, $unrelatedEmployee] as $target) {
+        $this->app['auth']->forgetGuards();
+        $this->withHeader('Authorization', 'Bearer '.$managerToken)
+            ->getJson('/api/v1/employees/'.$target->id)
+            ->assertStatus(403);
+    }
 
+    // Own record stays available (self-service).
     $this->app['auth']->forgetGuards();
-
-    // 2. Manager views nested subordinate -> personal data IS present
-    $nestedResp = $this->withHeader('Authorization', 'Bearer '.$managerToken)
-        ->getJson('/api/v1/employees/'.$nestedSubordinate->id);
-    $nestedResp->assertStatus(200);
-    expect($nestedResp->json('data'))->toHaveKey('phone', '+144444444')
-        ->and($nestedResp->json('data'))->toHaveKey('national_id', 'NAT-SUB-2');
-
-    $this->app['auth']->forgetGuards();
-
-    // 3. Manager views unrelated employee -> basic data present, personal data IS MASKED / ABSENT
-    $unrelatedResp = $this->withHeader('Authorization', 'Bearer '.$managerToken)
-        ->getJson('/api/v1/employees/'.$unrelatedEmployee->id);
-    $unrelatedResp->assertStatus(200);
-    expect($unrelatedResp->json('data'))->not->toHaveKey('phone')
-        ->and($unrelatedResp->json('data'))->not->toHaveKey('national_id');
+    $own = $this->withHeader('Authorization', 'Bearer '.$managerToken)->getJson('/api/v1/employees/'.$managerEmployee->id);
+    $own->assertStatus(200);
 });
 
-test('employee list endpoint does not expose personal data for unauthorized employees', function () {
+test('employee list endpoint is denied for users without employees.view', function () {
     $company = Company::factory()->create();
     app(TenantContext::class)->set($company);
 
@@ -208,16 +191,6 @@ test('employee list endpoint does not expose personal data for unauthorized empl
     $response = $this->withHeader('Authorization', 'Bearer '.$token)
         ->getJson('/api/v1/employees');
 
-    $response->assertStatus(200)
-        ->assertJsonCount(2, 'data');
-
-    $items = collect($response->json('data'));
-
-    // Own employee record has phone
-    $ownItem = $items->firstWhere('id', $ownEmployee->id);
-    expect($ownItem)->toHaveKey('phone', '+100000000');
-
-    // Other employee record does NOT have phone
-    $otherItem = $items->firstWhere('id', $otherEmployee->id);
-    expect($otherItem)->not->toHaveKey('phone');
+    // Phase 3.2: the directory listing requires employees.view (intentional change).
+    $response->assertStatus(403);
 });

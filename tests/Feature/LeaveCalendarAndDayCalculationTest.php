@@ -185,8 +185,9 @@ test('only owner/admin can update the company work schedule', function () {
 
 // ─── Company Holidays API ─────────────────────────────────────────────────────
 
-test('owner can create a company holiday', function () {
-    $user = User::factory()->create(['role' => UserRole::Owner]);
+test('an explicitly authorized administrator can create a company holiday', function () {
+    // FINAL-V3: the Owner account type alone grants nothing; the System Super Admin role does.
+    $user = User::factory()->systemAdmin()->create(['role' => UserRole::Owner]);
     $token = $user->createToken('test')->plainTextToken;
     app(TenantContext::class)->clear();
 

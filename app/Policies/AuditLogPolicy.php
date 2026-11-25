@@ -2,13 +2,13 @@
 
 namespace App\Policies;
 
-use App\Enums\UserRole;
 use App\Models\User;
+use App\Rbac\PermissionResolver;
 
 class AuditLogPolicy
 {
     public function viewAny(User $user): bool
     {
-        return $user->role === UserRole::Owner || $user->role === UserRole::Admin;
+        return PermissionResolver::has($user, 'audit_logs.view');
     }
 }

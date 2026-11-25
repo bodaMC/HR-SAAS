@@ -4,6 +4,7 @@ namespace Database\Factories;
 
 use App\Enums\UserRole;
 use App\Models\User;
+use App\Rbac\RbacService;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
@@ -44,6 +45,25 @@ class UserFactory extends Factory
     /**
      * Indicate that the model's email address should be unverified.
      */
+    /**
+     * Test/seed helper: give the created account the HR Administrator role through the
+     * trusted bootstrap path (the same code the artisan command uses).
+     */
+    public function hr(): static
+    {
+        return $this->afterCreating(function (User $user) {
+            app(RbacService::class)->bootstrapHr($user->company()->withoutGlobalScopes()->firstOrFail(), $user);
+        });
+    }
+
+    /** Test/seed helper: the tenant's single System Super Admin, through the trusted provisioning path. */
+    public function systemAdmin(): static
+    {
+        return $this->afterCreating(function (User $user) {
+            app(RbacService::class)->bootstrapSystemAdmin($user->company()->withoutGlobalScopes()->firstOrFail(), $user, 'Synthetic test fixture provisioning');
+        });
+    }
+
     public function unverified(): static
     {
         return $this->state(fn (array $attributes) => [

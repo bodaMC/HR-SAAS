@@ -15,7 +15,7 @@ test('owner and admin can create, read, update, and soft delete an employee', fu
     $company = Company::factory()->create();
     app(TenantContext::class)->set($company);
 
-    $user = User::factory()->create(['role' => $role]);
+    $user = User::factory()->hr()->create(['role' => $role]);
     $token = $user->createToken('test-token')->plainTextToken;
 
     $department = Department::factory()->create(['name' => 'Product']);
@@ -103,7 +103,7 @@ test('employee number and email are uniquely scoped to the company', function ()
 
     // Company A creates employee with EMP-001 and john@orbit.test
     app(TenantContext::class)->set($companyA);
-    $ownerA = User::factory()->owner()->create();
+    $ownerA = User::factory()->owner()->hr()->create();
     $tokenA = $ownerA->createToken('token-a')->plainTextToken;
     Employee::factory()->create([
         'employee_number' => 'EMP-001',
@@ -139,7 +139,7 @@ test('employee number and email are uniquely scoped to the company', function ()
 
     // Company B can use both EMP-001 and john@orbit.test without collision
     app(TenantContext::class)->set($companyB);
-    $ownerB = User::factory()->owner()->create();
+    $ownerB = User::factory()->owner()->hr()->create();
     $tokenB = $ownerB->createToken('token-b')->plainTextToken;
     app(TenantContext::class)->clear();
 
@@ -161,7 +161,7 @@ test('employee cannot link to another company department, job title, or user', f
     $companyB = Company::factory()->create();
 
     app(TenantContext::class)->set($companyA);
-    $ownerA = User::factory()->owner()->create();
+    $ownerA = User::factory()->owner()->hr()->create();
     $tokenA = $ownerA->createToken('token-a')->plainTextToken;
     app(TenantContext::class)->clear();
 
@@ -216,7 +216,7 @@ test('employee cannot link to another company department, job title, or user', f
 test('employee number and email remain permanently reserved after soft deletion', function () {
     $company = Company::factory()->create();
     app(TenantContext::class)->set($company);
-    $owner = User::factory()->owner()->create();
+    $owner = User::factory()->owner()->hr()->create();
     $token = $owner->createToken('token')->plainTextToken;
     $employee = Employee::factory()->create([
         'employee_number' => 'EMP-PERM-01',

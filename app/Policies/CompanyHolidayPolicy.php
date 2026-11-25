@@ -2,9 +2,9 @@
 
 namespace App\Policies;
 
-use App\Enums\UserRole;
 use App\Models\CompanyHoliday;
 use App\Models\User;
+use App\Rbac\PermissionResolver;
 
 class CompanyHolidayPolicy
 {
@@ -15,12 +15,12 @@ class CompanyHolidayPolicy
 
     public function create(User $user): bool
     {
-        return $user->role === UserRole::Owner || $user->role === UserRole::Admin;
+        return PermissionResolver::has($user, 'work_schedules.manage');
     }
 
     public function delete(User $user, CompanyHoliday $holiday): bool
     {
-        return ($user->role === UserRole::Owner || $user->role === UserRole::Admin)
+        return PermissionResolver::has($user, 'work_schedules.manage')
             && $user->company_id === $holiday->company_id;
     }
 }

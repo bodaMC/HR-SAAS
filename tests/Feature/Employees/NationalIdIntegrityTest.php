@@ -17,7 +17,7 @@ function nid_actor(?Company $company = null, UserRole $role = UserRole::Owner): 
 {
     $company ??= Company::factory()->create();
     app(TenantContext::class)->set($company);
-    $user = User::factory()->create(['role' => $role]);
+    $user = User::factory()->hr()->create(['role' => $role]);
     $token = $user->createToken('t')->plainTextToken;
     app(TenantContext::class)->clear();
 

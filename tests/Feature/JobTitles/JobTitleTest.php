@@ -13,7 +13,7 @@ test('owner and admin can list, create, update, and delete job titles', function
     $company = Company::factory()->create();
     app(TenantContext::class)->set($company);
 
-    $user = User::factory()->create(['role' => $role]);
+    $user = User::factory()->hr()->create(['role' => $role]);
     $token = $user->createToken('test-token')->plainTextToken;
     app(TenantContext::class)->clear();
 
@@ -62,10 +62,10 @@ test('manager and employee cannot create, update, or delete job titles', functio
     $jobTitle = JobTitle::factory()->create(['name' => 'Tech Lead']);
     app(TenantContext::class)->clear();
 
-    // View is allowed
+    // Phase 3.2: viewing requires job_titles.view (intentional change)
     $viewResp = $this->withHeader('Authorization', 'Bearer '.$token)
         ->getJson('/api/v1/job-titles/'.$jobTitle->id);
-    $viewResp->assertStatus(200);
+    $viewResp->assertStatus(403);
 
     $this->app['auth']->forgetGuards();
 
@@ -97,7 +97,7 @@ test('job title name is uniquely scoped to the company', function () {
     $companyB = Company::factory()->create();
 
     app(TenantContext::class)->set($companyA);
-    $ownerA = User::factory()->owner()->create();
+    $ownerA = User::factory()->owner()->hr()->create();
     $tokenA = $ownerA->createToken('token-a')->plainTextToken;
     JobTitle::factory()->create(['name' => 'HR Specialist']);
     app(TenantContext::class)->clear();
@@ -112,7 +112,7 @@ test('job title name is uniquely scoped to the company', function () {
 
     // Same title in Company B allowed
     app(TenantContext::class)->set($companyB);
-    $ownerB = User::factory()->owner()->create();
+    $ownerB = User::factory()->owner()->hr()->create();
     $tokenB = $ownerB->createToken('token-b')->plainTextToken;
     app(TenantContext::class)->clear();
 
@@ -125,7 +125,7 @@ test('job title name is uniquely scoped to the company', function () {
 test('job title name remains permanently reserved after soft deletion', function () {
     $company = Company::factory()->create();
     app(TenantContext::class)->set($company);
-    $owner = User::factory()->owner()->create();
+    $owner = User::factory()->owner()->hr()->create();
     $token = $owner->createToken('token')->plainTextToken;
     $jobTitle = JobTitle::factory()->create(['name' => 'Lead Architect']);
     app(TenantContext::class)->clear();

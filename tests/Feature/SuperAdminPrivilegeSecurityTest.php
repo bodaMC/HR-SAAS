@@ -107,7 +107,7 @@ test('unflagged tenant administrator cannot access another tenants data', functi
 test('tenant users cannot promote themselves or others through employee updates', function (UserRole $role) {
     $company = Company::factory()->create();
     app(TenantContext::class)->set($company);
-    $actor = User::factory()->create(['role' => $role]);
+    $actor = $role === UserRole::Employee ? User::factory()->create(['role' => $role]) : User::factory()->hr()->create(['role' => $role]);
     $other = User::factory()->create();
     $ownEmployee = Employee::factory()->create(['user_id' => $actor->id]);
     $otherEmployee = Employee::factory()->create(['user_id' => $other->id]);
@@ -131,7 +131,7 @@ test('tenant users cannot promote themselves or others through employee updates'
     }
 })->with([UserRole::Employee, UserRole::Owner, UserRole::Admin]);
 
-test('former privileged email no longer bypasses business audit logging', function () {
+test('former privileged email never bypasses audit logging and platform actions are audited', function () {
     $company = Company::factory()->create();
     app(TenantContext::class)->set($company);
     $user = User::factory()->create(['email' => 'superadmin@orbit.test']);
@@ -139,6 +139,8 @@ test('former privileged email no longer bypasses business audit logging', functi
     expect($entry)->not->toBeNull()->and($entry->user_id)->toBe($user->id);
     $user->is_super_admin = true;
     $user->save();
-    expect(app(AuditLogger::class)->log('trusted-regression-check', user: $user))->toBeNull();
+    // Phase 3.2: Super Admin operations are audited too (intentional change from the old exemption).
+    $audited = app(AuditLogger::class)->log('trusted-regression-check', user: $user);
+    expect($audited)->not->toBeNull()->and($audited->user_id)->toBe($user->id);
     app(TenantContext::class)->clear();
 });

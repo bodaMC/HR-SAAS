@@ -15,7 +15,7 @@ function dir_seed(): array
 {
     $company = Company::factory()->create();
     app(TenantContext::class)->set($company);
-    $user = User::factory()->create(['role' => UserRole::Owner]);
+    $user = User::factory()->hr()->create(['role' => UserRole::Owner]);
     $token = $user->createToken('t')->plainTextToken;
     $eng = Department::factory()->create(['name' => 'Engineering']);
     $fin = Department::factory()->create(['name' => 'Finance']);
