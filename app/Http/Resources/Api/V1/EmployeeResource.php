@@ -34,10 +34,16 @@ class EmployeeResource extends JsonResource
             'employment_status' => $this->employment_status instanceof EmploymentStatus
                 ? $this->employment_status->value
                 : $this->employment_status,
+            'employment_type' => $this->employment_type,
+            'is_trainee' => (bool) $this->is_trainee,
+            'has_picture' => $this->avatar_path !== null,
+            'picture_version' => $this->avatar_updated_at?->timestamp,
             'department_id' => $this->department_id,
             'job_title_id' => $this->job_title_id,
             'manager_id' => $this->manager_id,
-            'user_id' => $this->user_id,
+            // Phase 3.3: no account identifiers in the directory (protected accounts stay unexposed).
+            'has_account' => $this->user_id !== null,
+            'is_self' => $this->user_id !== null && $this->user_id === $request->user()?->id,
             'department' => new DepartmentResource($this->whenLoaded('department')),
             'job_title' => new JobTitleResource($this->whenLoaded('jobTitle')),
             'manager' => $this->whenLoaded('manager', function () {
@@ -52,18 +58,6 @@ class EmployeeResource extends JsonResource
                     'first_name' => $this->manager->first_name,
                     'last_name' => $this->manager->last_name,
                     'email' => $this->manager->email,
-                ];
-            }),
-            'user' => $this->whenLoaded('user', function () {
-                if (! $this->user) {
-                    return null;
-                }
-
-                return [
-                    'id' => $this->user->id,
-                    'uuid' => $this->user->uuid,
-                    'name' => $this->user->name,
-                    'email' => $this->user->email,
                 ];
             }),
             // Conditional sensitive personal data fields

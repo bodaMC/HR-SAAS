@@ -2,118 +2,66 @@
 
 namespace App\Http\Controllers\Api\V1\Auth;
 
-use App\Enums\UserRole;
+use App\Accounts\AccountService;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\Auth\LoginRequest;
-use App\Http\Requests\Api\V1\Auth\RegisterCompanyRequest;
 use App\Http\Resources\Api\V1\CompanyResource;
 use App\Http\Resources\Api\V1\UserResource;
-use App\Models\Company;
 use App\Models\User;
 use App\Rbac\PermissionResolver;
-use App\Tenancy\TenantContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Str;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\Response;
 
 class AuthController extends Controller
 {
     /**
-     * Register a new Company and its initial Owner user atomically.
-     */
-    public function registerCompany(RegisterCompanyRequest $request): JsonResponse
-    {
-        $validated = $request->validated();
-
-        $slug = $validated['company_slug'] ?? Str::slug($validated['company_name']);
-
-        if (empty($slug)) {
-            $slug = 'company-'.Str::lower(Str::random(6));
-        }
-
-        if (Company::where('slug', $slug)->exists()) {
-            $slug = $slug.'-'.Str::lower(Str::random(4));
-        }
-
-        return DB::transaction(function () use ($validated, $slug) {
-            try {
-                // 1. Create the Company
-                $company = Company::create([
-                    'name' => $validated['company_name'],
-                    'slug' => $slug,
-                    'is_active' => true,
-                ]);
-
-                // 2. Establish TenantContext before creating User so BelongsToCompany hook succeeds
-                app(TenantContext::class)->set($company);
-
-                // 3. Create the Owner User with forced server-side attributes
-                $user = User::create([
-                    'name' => $validated['name'],
-                    'email' => $validated['email'],
-                    'password' => $validated['password'],
-                    'phone' => $validated['phone'] ?? null,
-                    'role' => UserRole::Owner,
-                    'is_active' => true,
-                ]);
-
-                // 4. Issue Sanctum token with configurable expiration
-                $expiration = config('sanctum.expiration');
-                $expiresAt = $expiration ? now()->addMinutes((int) $expiration) : null;
-                $token = $user->createToken('orbit-auth-token', ['*'], $expiresAt)->plainTextToken;
-
-                return response()->json([
-                    'message' => 'Company and owner registered successfully.',
-                    'token' => $token,
-                    'token_type' => 'Bearer',
-                    'user' => new UserResource($user->load('company')),
-                    'company' => new CompanyResource($company),
-                ], Response::HTTP_CREATED);
-            } finally {
-                app(TenantContext::class)->clear();
-            }
-        });
-    }
-
-    /**
      * Authenticate an existing user and issue a Sanctum token.
      */
-    public function login(LoginRequest $request): JsonResponse
+    public function login(LoginRequest $request, AccountService $accounts): JsonResponse
     {
         $validated = $request->validated();
+
+        // Phase 3.3 rate limiting of failed sign-ins: per email+IP and per IP. Successful sign-ins clear the
+        // per-email counter. The response is identical for unknown email and wrong password.
+        $emailKey = 'login|'.mb_strtolower($validated['email']).'|'.$request->ip();
+        $ipKey = 'login-ip|'.$request->ip();
+        if (RateLimiter::tooManyAttempts($emailKey, 5) || RateLimiter::tooManyAttempts($ipKey, 30)) {
+            $wait = max(RateLimiter::availableIn($emailKey), RateLimiter::availableIn($ipKey));
+
+            return response()->json(['message' => __('accounts.too_many_attempts'), 'code' => 'TOO_MANY_ATTEMPTS'], Response::HTTP_TOO_MANY_REQUESTS)
+                ->header('Retry-After', (string) max(1, $wait));
+        }
 
         $user = User::withoutGlobalScopes()->where('email', $validated['email'])->first();
 
         if (! $user || ! Hash::check($validated['password'], $user->password)) {
+            RateLimiter::hit($emailKey, 60);
+            RateLimiter::hit($ipKey, 60);
             throw ValidationException::withMessages([
                 'email' => [__('auth.failed')],
             ]);
         }
-
-        if (! $user->is_active) {
-            return response()->json([
-                'message' => 'Your user account is inactive.',
-                'code' => 'USER_INACTIVE',
-            ], Response::HTTP_FORBIDDEN);
+        [$status, $locked, $token] = $accounts->authenticate($user, $validated['password'], $validated['device_name'] ?? 'orbit-auth-token');
+        if ($status === 'failed') {
+            // The credentials or the account changed between the first check and the locked re-check.
+            RateLimiter::hit($emailKey, 60);
+            RateLimiter::hit($ipKey, 60);
+            throw ValidationException::withMessages(['email' => [__('auth.failed')]]);
         }
-
+        RateLimiter::clear($emailKey);
+        if ($status === 'inactive') {
+            return response()->json(['message' => 'Your user account is inactive.', 'code' => 'USER_INACTIVE'], Response::HTTP_FORBIDDEN);
+        }
+        if ($status === 'company_inactive') {
+            return response()->json(['message' => 'Your company is inactive.', 'code' => 'COMPANY_INACTIVE'], Response::HTTP_FORBIDDEN);
+        }
+        $user = $locked;
         $company = $user->company;
-
-        if (! $company || ! $company->is_active) {
-            return response()->json([
-                'message' => 'Your company is inactive.',
-                'code' => 'COMPANY_INACTIVE',
-            ], Response::HTTP_FORBIDDEN);
-        }
-
-        $deviceName = $validated['device_name'] ?? 'orbit-auth-token';
-        $expiration = config('sanctum.expiration');
-        $expiresAt = $expiration ? now()->addMinutes((int) $expiration) : null;
-        $token = $user->createToken($deviceName, ['*'], $expiresAt)->plainTextToken;
 
         return response()->json([
             'message' => 'Authenticated successfully.',

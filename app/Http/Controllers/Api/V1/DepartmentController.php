@@ -7,13 +7,20 @@ use App\Http\Requests\Api\V1\Departments\StoreDepartmentRequest;
 use App\Http\Requests\Api\V1\Departments\UpdateDepartmentRequest;
 use App\Http\Resources\Api\V1\DepartmentResource;
 use App\Models\Department;
+use App\Services\Audit\AuditLogger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpFoundation\Response;
 
 class DepartmentController extends Controller
 {
+    private function audit(string $action, $model, ?array $old, ?array $new): void
+    {
+        app(AuditLogger::class)->log($action, $model, $old, $new);
+    }
+
     /**
      * Display a listing of departments for the active company.
      */
@@ -37,7 +44,12 @@ class DepartmentController extends Controller
      */
     public function store(StoreDepartmentRequest $request): JsonResponse
     {
-        $department = Department::create($request->validated());
+        $department = DB::transaction(function () use ($request) {
+            $m = Department::create($request->validated());
+            $this->audit('department.created', $m, null, ['name' => $m->name]);
+
+            return $m;
+        });
 
         return (new DepartmentResource($department))
             ->response()
@@ -59,7 +71,11 @@ class DepartmentController extends Controller
      */
     public function update(UpdateDepartmentRequest $request, Department $department): DepartmentResource
     {
-        $department->update($request->validated());
+        DB::transaction(function () use ($request, $department) {
+            $old = $department->only(array_keys($request->validated()));
+            $department->update($request->validated());
+            $this->audit('department.updated', $department, $old, $department->only(array_keys($request->validated())));
+        });
 
         return new DepartmentResource($department);
     }
@@ -71,7 +87,10 @@ class DepartmentController extends Controller
     {
         $this->authorize('delete', $department);
 
-        $department->delete();
+        DB::transaction(function () use ($department) {
+            $department->delete();
+            $this->audit('department.deleted', $department, ['name' => $department->name], null);
+        });
 
         return response()->json([
             'message' => 'Department deleted successfully.',

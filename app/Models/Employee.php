@@ -45,7 +45,6 @@ class Employee extends Model
         'department_id',
         'job_title_id',
         'manager_id',
-        'user_id',
         'team_leader_id',
         'is_disabled',
         'insurance_years',
@@ -53,6 +52,8 @@ class Employee extends Model
         'is_team_leader',
         'is_project_engineer',
         'is_ceo',
+        'employment_type',
+        'is_trainee',
     ];
 
     /**
@@ -80,6 +81,7 @@ class Employee extends Model
         'is_team_leader' => false,
         'is_project_engineer' => false,
         'is_ceo' => false,
+        'is_trainee' => false,
     ];
 
     /**
@@ -101,6 +103,8 @@ class Employee extends Model
             'is_team_leader' => 'boolean',
             'is_project_engineer' => 'boolean',
             'is_ceo' => 'boolean',
+            'is_trainee' => 'boolean',
+            'avatar_updated_at' => 'datetime',
         ];
     }
 

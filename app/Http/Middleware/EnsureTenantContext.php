@@ -53,6 +53,15 @@ class EnsureTenantContext
             ], Response::HTTP_FORBIDDEN);
         }
 
+        // 4b. Phase 3.3: while a password change is pending the account may only change its password,
+        // read its identity or log out. Enforced here, server-side, for every token and every route.
+        if ($user->must_change_password && ! $request->routeIs('auth.change-password', 'auth.me', 'auth.logout')) {
+            return response()->json([
+                'message' => __('accounts.password_change_required'),
+                'code' => 'PASSWORD_CHANGE_REQUIRED',
+            ], Response::HTTP_FORBIDDEN);
+        }
+
         // 5. Set TenantContext
         app(TenantContext::class)->set($company);
 

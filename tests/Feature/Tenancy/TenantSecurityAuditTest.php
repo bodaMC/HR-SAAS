@@ -152,30 +152,21 @@ test('route model binding returns 404 not found when attempting to access a user
     expect(User::withoutGlobalScopes()->find($userB->id)->deleted_at)->toBeNull();
 });
 
-test('registration transaction is atomic and cleans up tenant context in all failure conditions', function () {
+test('company provisioning is atomic and cleans up tenant context in all failure conditions', function () {
     expect(app(TenantContext::class)->hasTenant())->toBeFalse();
 
-    // Test with invalid email to trigger validation failure before transaction
-    $this->postJson('/api/v1/auth/register-company', [
-        'company_name' => 'Failed Co',
-        'name' => 'Failed User',
-        'email' => 'invalid-email-format',
-        'password' => 'SecurePassword123!',
-    ])->assertStatus(422);
-
+    // Invalid email: refused before anything is written.
+    $this->artisan('tenant:provision', ['--name' => 'Failed Co', '--admin-name' => 'Failed User', '--admin-email' => 'invalid-email-format', '--reason' => 'atomicity regression test'])->assertFailed();
     expect(app(TenantContext::class)->hasTenant())->toBeFalse()
         ->and(Company::where('name', 'Failed Co')->exists())->toBeFalse();
 
-    // Test with valid payload: context is active during user creation, but cleared after registration
-    $response = $this->postJson('/api/v1/auth/register-company', [
-        'company_name' => 'Atomic Success Co',
-        'name' => 'Success Owner',
-        'email' => 'owner@atomicsuccess.com',
-        'password' => 'SecurePassword123!',
-    ]);
+    // Missing mandatory reason: the company insert is rolled back together with the account.
+    $this->artisan('tenant:provision', ['--name' => 'Rolled Back Co', '--admin-name' => 'X User', '--admin-email' => 'x@rolledback.test'])->assertFailed();
+    expect(Company::withoutGlobalScopes()->where('name', 'Rolled Back Co')->exists())->toBeFalse()
+        ->and(User::withoutGlobalScopes()->where('email', 'x@rolledback.test')->exists())->toBeFalse()
+        ->and(app(TenantContext::class)->hasTenant())->toBeFalse();
 
-    $response->assertStatus(201);
-
-    // Verify TenantContext is cleared after response completes
-    expect(app(TenantContext::class)->hasTenant())->toBeFalse();
+    $this->artisan('tenant:provision', ['--name' => 'Atomic Success Co', '--admin-name' => 'Success Owner', '--admin-email' => 'owner@atomicsuccess.com', '--reason' => 'atomicity regression test'])->assertSuccessful();
+    expect(app(TenantContext::class)->hasTenant())->toBeFalse()
+        ->and(Company::withoutGlobalScopes()->where('name', 'Atomic Success Co')->exists())->toBeTrue();
 });

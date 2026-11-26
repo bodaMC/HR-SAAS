@@ -36,6 +36,14 @@ return [
             'job_titles.update',
             'job_titles.delete',
         ],
+        'accounts' => [
+            'accounts.view',
+            'accounts.create',
+            'accounts.link',
+            'accounts.activate',
+            'accounts.deactivate',
+            'accounts.reset_password',
+        ],
         'roles' => [
             'roles.view',
             'roles.create',
@@ -49,8 +57,10 @@ return [
 
     'protected' => [
         'audit_logs.view',
+        'audit_logs.view_operational',
         'company_settings.manage',
         'work_schedules.manage',
+        'approval_workflows.manage',
     ],
 
     'reserved' => [
@@ -72,26 +82,21 @@ return [
     'permission_administrator' => ['roles.assign', 'permissions.manage'],
 
     'system_roles' => [
+        // Phase 3.3 (revised matrix): HR Administrator is an OPERATIONAL role. It holds no RBAC
+        // management, inspection or delegation permission (roles.*, permissions.*), cannot
+        // assign roles and delegates nothing. Ordinary employee-account management is
+        // available through accounts.*; protected accounts stay out of reach (AccountGuard).
         'hr_administrator' => [
             'name' => 'HR Administrator',
             'name_ar' => 'مسؤول الموارد البشرية',
-            'description' => 'Manages employees, departments, job titles and tenant roles and permissions.',
-            // Explicit delegation boundary: what holders of THIS role may hand out to
-            // others. Holding a permission never implies the right to delegate it.
-            // Role administration and platform/financial permissions are deliberately
-            // outside it, so HR cannot create further permission administrators.
-            'delegates' => [
-                'employees.view', 'employees.create', 'employees.update', 'employees.delete', 'employees.view_personal_data',
-                'departments.view', 'departments.create', 'departments.update', 'departments.delete',
-                'job_titles.view', 'job_titles.create', 'job_titles.update', 'job_titles.delete',
-                'roles.view', 'permissions.view',
-            ],
+            'description' => 'Manages employees, departments, job titles, ordinary employee accounts and HR operations. No role or permission administration.',
+            'delegates' => [],
             'permissions' => [
                 'employees.view', 'employees.create', 'employees.update', 'employees.delete', 'employees.view_personal_data',
                 'departments.view', 'departments.create', 'departments.update', 'departments.delete',
                 'job_titles.view', 'job_titles.create', 'job_titles.update', 'job_titles.delete',
-                'roles.view', 'roles.create', 'roles.update', 'roles.delete', 'roles.assign',
-                'permissions.view', 'permissions.manage',
+                'accounts.view', 'accounts.create', 'accounts.link', 'accounts.activate', 'accounts.deactivate', 'accounts.reset_password',
+                'work_schedules.manage', 'company_settings.manage', 'approval_workflows.manage', 'audit_logs.view_operational',
             ],
         ],
         'system_super_admin' => [
@@ -100,11 +105,10 @@ return [
             'description' => 'Highest application administrator of ONE tenant. Protected, singleton, provisioned only by the trusted operator command. Never platform authority.',
             // Exclusive: at most one holder per tenant (database-enforced).
             'exclusive' => true,
-            // May delegate every assignable tenant permission (including HR administration).
-            // Protected permissions and this role itself are never delegable.
+            // May delegate every assignable tenant permission. Protected permissions and this role itself are never delegable.
             'delegates' => 'assignable',
-            // HR Administrator permissions (superset) plus the protected tenant administration permissions.
-            'permissions' => 'hr_plus_protected',
+            // Every assignable permission (HR operations + roles & permissions) plus the protected tenant administration permissions.
+            'permissions' => 'all_plus_protected',
         ],
     ],
 ];

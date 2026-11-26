@@ -29,7 +29,10 @@ use App\Policies\NotificationPolicy;
 use App\Policies\PermissionRequestPolicy;
 use App\Policies\ProjectPolicy;
 use App\Tenancy\TenantContext;
+use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -49,6 +52,25 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // Phase 3.3: rate limit for password-management endpoints (per authenticated user, else IP).
+        // Password-management limits are keyed by the ACCOUNT (resolved through the sanctum guard), not by the bearer
+        // token, so minting or holding several tokens for one account does not multiply the allowance. A second
+        // per-IP limit bounds one client rotating accounts. Unauthenticated callers fall back to the IP alone.
+        $tooMany = fn () => response()->json(['message' => __('accounts.too_many_attempts'), 'code' => 'TOO_MANY_ATTEMPTS'], 429);
+        $limits = function (string $name, int $perAccount, int $perIp) use ($tooMany) {
+            return function (Request $r) use ($name, $perAccount, $perIp, $tooMany) {
+                $uid = $r->user('sanctum')?->getAuthIdentifier();
+                $out = [Limit::perMinute($perIp)->by($name.'-ip|'.$r->ip())->response($tooMany)];
+                if ($uid !== null) {
+                    $out[] = Limit::perMinute($perAccount)->by($name.'-acct|'.$uid)->response($tooMany);
+                }
+
+                return $out;
+            };
+        };
+        RateLimiter::for('password', $limits('pw', 10, 60));
+        RateLimiter::for('account-admin', $limits('aa', 40, 200));
+
         // Phase 7 — HR Core Policies
         Gate::policy(Department::class, DepartmentPolicy::class);
         Gate::policy(JobTitle::class, JobTitlePolicy::class);

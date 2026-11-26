@@ -24,7 +24,9 @@ class AuditLogger
         ?Model $auditable = null,
         ?array $oldValues = null,
         ?array $newValues = null,
-        ?User $user = null
+        ?User $user = null,
+        ?string $reason = null,
+        ?string $visibility = null
     ): ?AuditLog {
         $user = $user ?? auth()->user();
 
@@ -50,6 +52,8 @@ class AuditLogger
                 'auditable_type' => $auditable ? get_class($auditable) : 'System',
                 'auditable_id' => $auditable?->id,
                 'action' => $action,
+                'reason' => $reason,
+                'visibility' => $visibility ?? AuditVisibility::for($action),
                 'old_values' => $oldValues,
                 'new_values' => $newValues,
                 'ip_address' => Request::ip(),

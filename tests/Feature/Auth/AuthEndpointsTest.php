@@ -5,172 +5,19 @@ use App\Models\Company;
 use App\Models\User;
 use App\Tenancy\TenantContext;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Hash;
 
 uses(RefreshDatabase::class);
 
 // ─────────────────────────────────────────────
-// Registration Tests
+// Registration (Phase 3.3: public registration was removed; see AccountLifecycleTest for provisioning)
 // ─────────────────────────────────────────────
 
-test('can register a company and owner user atomically', function () {
-    $payload = [
-        'company_name' => 'Acme Corporation',
-        'company_slug' => 'acme-corp',
-        'name' => 'John Doe',
-        'email' => 'john@acme.com',
-        'password' => 'SecurePass123!',
-        'phone' => '+1234567890',
-    ];
-
-    $response = $this->postJson('/api/v1/auth/register-company', $payload);
-
-    $response->assertStatus(201)
-        ->assertJsonStructure([
-            'message',
-            'token',
-            'token_type',
-            'user' => [
-                'id',
-                'uuid',
-                'name',
-                'email',
-                'phone',
-                'role',
-                'is_active',
-                'created_at',
-            ],
-            'company' => [
-                'id',
-                'uuid',
-                'name',
-                'slug',
-                'is_active',
-                'created_at',
-            ],
-        ])
-        ->assertJson([
-            'message' => 'Company and owner registered successfully.',
-            'token_type' => 'Bearer',
-            'user' => [
-                'name' => 'John Doe',
-                'email' => 'john@acme.com',
-                'phone' => '+1234567890',
-                'role' => 'owner',
-                'is_active' => true,
-            ],
-            'company' => [
-                'name' => 'Acme Corporation',
-                'slug' => 'acme-corp',
-                'is_active' => true,
-            ],
-        ]);
-
-    // Verify in database
-    $company = Company::where('slug', 'acme-corp')->first();
-    expect($company)->not->toBeNull()
-        ->and($company->name)->toBe('Acme Corporation')
-        ->and($company->uuid)->not->toBeNull();
-
-    // Verify user in database with correct company_id and Owner role
-    $user = User::withoutGlobalScopes()->where('email', 'john@acme.com')->first();
-    expect($user)->not->toBeNull()
-        ->and($user->company_id)->toBe($company->id)
-        ->and($user->role)->toBe(UserRole::Owner)
-        ->and($user->uuid)->not->toBeNull();
-
-    // Verify password is encrypted
-    expect(Hash::check('SecurePass123!', $user->password))->toBeTrue();
-});
-
-test('registration auto-generates slug if not provided', function () {
-    $payload = [
-        'company_name' => 'Beta Global Solutions',
-        'name' => 'Alice Smith',
-        'email' => 'alice@betaglobal.com',
-        'password' => 'SecurePass123!',
-    ];
-
-    $response = $this->postJson('/api/v1/auth/register-company', $payload);
-
-    $response->assertStatus(201);
-
-    $company = Company::where('name', 'Beta Global Solutions')->first();
-    expect($company)->not->toBeNull()
-        ->and($company->slug)->toContain('beta-global-solutions');
-});
-
-test('registration forces server-side role, uuid, and company_id, ignoring client overrides', function () {
-    $fakeCompany = Company::factory()->create();
-
-    $payload = [
-        'company_name' => 'Cyberdyne Systems',
-        'name' => 'Miles Dyson',
-        'email' => 'miles@cyberdyne.com',
-        'password' => 'SecurePass123!',
-        // Malicious client attempt to spoof role, company_id, and uuid
-        'role' => 'employee',
-        'company_id' => $fakeCompany->id,
-        'uuid' => '00000000-0000-0000-0000-000000000000',
-    ];
-
-    $response = $this->postJson('/api/v1/auth/register-company', $payload);
-
-    $response->assertStatus(201);
-
-    $user = User::withoutGlobalScopes()->where('email', 'miles@cyberdyne.com')->first();
-    $newCompany = Company::where('name', 'Cyberdyne Systems')->first();
-
-    // Must be assigned Owner role and new company_id, NOT the spoofed values
-    expect($user->role)->toBe(UserRole::Owner)
-        ->and($user->company_id)->toBe($newCompany->id)
-        ->and($user->company_id)->not->toBe($fakeCompany->id)
-        ->and($user->uuid)->not->toBe('00000000-0000-0000-0000-000000000000');
-});
-
-test('registration fails validation with duplicate email or duplicate slug', function () {
-    // Create an existing user and company
-    $existingCompany = Company::factory()->create(['slug' => 'taken-slug']);
-    app(TenantContext::class)->set($existingCompany);
-    User::factory()->create(['email' => 'taken@example.com']);
-    app(TenantContext::class)->clear();
-
-    // Duplicate email
-    $responseEmail = $this->postJson('/api/v1/auth/register-company', [
-        'company_name' => 'New Co',
-        'name' => 'User',
-        'email' => 'taken@example.com',
-        'password' => 'SecurePass123!',
-    ]);
-    $responseEmail->assertStatus(422)
-        ->assertJsonValidationErrors(['email']);
-
-    // Duplicate company_slug
-    $responseSlug = $this->postJson('/api/v1/auth/register-company', [
-        'company_name' => 'New Co',
-        'company_slug' => 'taken-slug',
-        'name' => 'User',
-        'email' => 'new@example.com',
-        'password' => 'SecurePass123!',
-    ]);
-    $responseSlug->assertStatus(422)
-        ->assertJsonValidationErrors(['company_slug']);
-});
-
-test('registration rolls back database changes if an error occurs', function () {
-    // Attempt registration with invalid password to cause validation failure
-    $response = $this->postJson('/api/v1/auth/register-company', [
-        'company_name' => 'Doomed Company',
-        'name' => 'Doomed User',
-        'email' => 'doomed@example.com',
-        'password' => 'short', // Too short for default password rule
-    ]);
-
-    $response->assertStatus(422);
-
-    // Assert that the company was not created in the database
-    expect(Company::where('name', 'Doomed Company')->exists())->toBeFalse();
-    expect(User::withoutGlobalScopes()->where('email', 'doomed@example.com')->exists())->toBeFalse();
+test('the unrestricted public company registration endpoint no longer exists', function () {
+    $this->postJson('/api/v1/auth/register-company', [
+        'company_name' => 'Acme', 'name' => 'John', 'email' => 'john@acme.test', 'password' => 'SecurePass123!',
+    ])->assertStatus(404);
+    expect(Company::where('name', 'Acme')->exists())->toBeFalse()
+        ->and(User::withoutGlobalScopes()->where('email', 'john@acme.test')->exists())->toBeFalse();
 });
 
 // ─────────────────────────────────────────────
@@ -456,43 +303,6 @@ test('me endpoint returns 403 when user account or company is deactivated after 
 // Token Expiration & Contract Security Tests
 // ─────────────────────────────────────────────
 
-test('user resource never exposes internal company_id in public responses', function () {
-    $payload = [
-        'company_name' => 'Zero Leakage Inc',
-        'name' => 'Alice Secret',
-        'email' => 'alice@zeroleak.com',
-        'password' => 'SecurePass123!',
-    ];
-
-    $response = $this->postJson('/api/v1/auth/register-company', $payload);
-    $response->assertStatus(201);
-
-    $userData = $response->json('user');
-    expect($userData)->not->toHaveKey('company_id')
-        ->and($userData['uuid'])->toBeString()
-        ->and($userData['company']['uuid'])->toBeString();
-});
-
-test('registration issues tokens with explicit expiration set from config', function () {
-    config(['sanctum.expiration' => 120]); // 2 hours
-
-    $response = $this->postJson('/api/v1/auth/register-company', [
-        'company_name' => 'Expiring Co',
-        'name' => 'Exp User',
-        'email' => 'exp@example.com',
-        'password' => 'SecurePass123!',
-    ]);
-
-    $response->assertStatus(201);
-
-    $user = User::withoutGlobalScopes()->where('email', 'exp@example.com')->first();
-    $tokenRecord = $user->tokens()->first();
-
-    expect($tokenRecord->expires_at)->not->toBeNull()
-        ->and($tokenRecord->expires_at->isFuture())->toBeTrue()
-        ->and(now()->diffInMinutes($tokenRecord->expires_at))->toBeGreaterThanOrEqual(119);
-});
-
 test('login issues tokens with explicit expiration set from config', function () {
     config(['sanctum.expiration' => 60]); // 1 hour
 
@@ -542,4 +352,18 @@ test('expired sanctum tokens are rejected with 401 unauthorized', function () {
 
     $response->assertStatus(401)
         ->assertJson(['message' => 'Unauthenticated.']);
+});
+
+test('user resource never exposes internal company_id in public responses', function () {
+    $company = Company::factory()->create();
+    app(TenantContext::class)->set($company);
+    User::factory()->create(['email' => 'zero@leak.test', 'password' => 'ValidPass123!']);
+    app(TenantContext::class)->clear();
+
+    $response = $this->postJson('/api/v1/auth/login', ['email' => 'zero@leak.test', 'password' => 'ValidPass123!'])->assertOk();
+
+    $userData = $response->json('user');
+    expect($userData)->not->toHaveKey('company_id')
+        ->and($userData['uuid'])->toBeString()
+        ->and($userData['company']['uuid'])->toBeString();
 });

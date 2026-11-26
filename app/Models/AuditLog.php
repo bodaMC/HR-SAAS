@@ -19,6 +19,8 @@ class AuditLog extends Model
         'auditable_type',
         'auditable_id',
         'action',
+        'reason',
+        'visibility',
         'old_values',
         'new_values',
         'ip_address',

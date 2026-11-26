@@ -39,6 +39,13 @@ function dir_get($t, string $token, string $qs = '')
 {
     app('auth')->forgetGuards();
 
+    // Phase 3.3: the directory now defaults to CURRENT employees. These Phase 3.2 filter tests keep
+    // their original "all rows" meaning through scope=all unless they set scope/status themselves
+    // (the new default is covered in the account lifecycle tests).
+    if (! str_contains($qs, 'scope=') && ! str_contains($qs, 'employment_status=')) {
+        $qs .= ($qs === '' ? '?' : '&').'scope=all';
+    }
+
     return $t->withHeader('Authorization', 'Bearer '.$token)->getJson('/api/v1/employees'.$qs);
 }
 
@@ -77,7 +84,7 @@ test('filters combine with AND semantics', function () {
 
 test('empty filter values are ignored (all rows)', function () {
     $s = dir_seed();
-    expect(dir_nums(dir_get($this, $s['token'], '?search=&department_id=&job_title_id=&manager_id=&employment_status=')))->toBe(['E1', 'E2', 'E3', 'E4', 'E5']);
+    expect(dir_nums(dir_get($this, $s['token'], '?search=&department_id=&job_title_id=&manager_id=&employment_status=&scope=all')))->toBe(['E1', 'E2', 'E3', 'E4', 'E5']);
 });
 
 test('LIKE wildcards in search are literal', function () {

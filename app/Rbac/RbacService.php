@@ -2,6 +2,7 @@
 
 namespace App\Rbac;
 
+use App\Accounts\AccountGuard;
 use App\Models\Company;
 use App\Models\Role;
 use App\Models\User;
@@ -218,11 +219,19 @@ class RbacService
                 throw new RbacDenied(403, 'protected_account', 'This protected administrator role can only be managed through the trusted operator procedure.');
             }
 
-            foreach ($add as $rid) {
-                $this->assertWithinBoundary($actor, $this->permissionsOfRole($rid));
-            }
-            foreach ($remove as $rid) {
-                // You cannot strip someone of a role that carries more than you hold.
+            // Phase 3.3: HR Administrator assignment and revocation belongs to the System Super Admin. The HR
+            // system role carries protected operational permissions (company settings, audit, ...) that are
+            // never delegable, so it is gated on the actor's protected role instead of the delegation list.
+            $hrRoleIds = Role::query()->where('company_id', $actor->company_id)->where('key', 'hr_administrator')->where('is_system', true)->pluck('id')->map(fn ($i) => (int) $i)->all();
+            foreach (array_merge($add, $remove) as $rid) {
+                if (in_array($rid, $hrRoleIds, true)) {
+                    if (! AccountGuard::isSystemAdmin($actor)) {
+                        throw new RbacDenied(403, 'delegation_exceeded', 'Only the System Super Admin can assign or revoke the HR Administrator role.', $this->permissionsOfRole($rid));
+                    }
+
+                    continue;
+                }
+                // You cannot grant, or strip someone of, a role that carries more than you may delegate.
                 $this->assertWithinBoundary($actor, $this->permissionsOfRole($rid));
             }
 
@@ -534,7 +543,7 @@ class RbacService
     }
 
     /** At least one active, non-platform user in the tenant must keep every permission-administrator permission. */
-    private function assertAdministratorRemains(int $companyId): void
+    public function assertAdministratorRemains(int $companyId): void
     {
         $need = config('rbac.permission_administrator');
         $rows = DB::table('user_roles as ur')

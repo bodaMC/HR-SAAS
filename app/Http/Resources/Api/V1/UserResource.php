@@ -27,6 +27,7 @@ class UserResource extends JsonResource
             'phone' => $this->phone,
             'role' => $this->role instanceof UserRole ? $this->role->value : $this->role,
             'is_active' => $this->is_active,
+            'must_change_password' => (bool) $this->must_change_password,
             'email_verified_at' => $this->email_verified_at?->toISOString(),
             'created_at' => $this->created_at?->toISOString(),
             'updated_at' => $this->updated_at?->toISOString(),

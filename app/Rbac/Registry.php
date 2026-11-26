@@ -44,8 +44,8 @@ final class Registry
     public static function systemRole(string $key): array
     {
         $def = config("rbac.system_roles.$key");
-        if (($def['permissions'] ?? null) === 'hr_plus_protected') {
-            $def['permissions'] = array_values(array_unique(array_merge(config('rbac.system_roles.hr_administrator.permissions'), self::protectedCodes())));
+        if (($def['permissions'] ?? null) === 'all_plus_protected') {
+            $def['permissions'] = array_values(array_unique(array_merge(self::assignable(), self::protectedCodes())));
         }
         if (($def['delegates'] ?? null) === 'assignable') {
             $def['delegates'] = self::assignable();

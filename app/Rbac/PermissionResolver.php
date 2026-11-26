@@ -36,9 +36,21 @@ final class PermissionResolver
             return self::$memo[$user->id];
         }
 
+        return self::$memo[$user->id] = $user->is_active ? self::latent($user) : [];
+    }
+
+    /**
+     * Permissions the account's role assignments WOULD grant, ignoring whether it is currently
+     * active. Used by the protected-account guard so that deactivating an administrator can
+     * never make it look ordinary (never memoized, never used for authorization).
+     *
+     * @return list<string>
+     */
+    public static function latent(User $user): array
+    {
         $codes = [];
 
-        if ($user->is_active && ! $user->isSuperAdmin()) {
+        if (! $user->isSuperAdmin()) {
             $rows = DB::table('user_roles as ur')
                 ->join('roles as r', function ($j) {
                     $j->on('r.id', '=', 'ur.role_id')->on('r.company_id', '=', 'ur.company_id');
@@ -66,7 +78,7 @@ final class PermissionResolver
         $codes = array_values(array_unique($codes));
         sort($codes);
 
-        return self::$memo[$user->id] = $codes;
+        return $codes;
     }
 
     /**

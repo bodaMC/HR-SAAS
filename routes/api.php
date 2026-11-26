@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\V1\Access\AccessUserController;
 use App\Http\Controllers\Api\V1\Access\RoleController;
+use App\Http\Controllers\Api\V1\AccountController;
 use App\Http\Controllers\Api\V1\AuditLogController;
 use App\Http\Controllers\Api\V1\Auth\AuthController;
 use App\Http\Controllers\Api\V1\CompanyHolidayController;
@@ -15,6 +16,7 @@ use App\Http\Controllers\Api\V1\LeaveRequestController;
 use App\Http\Controllers\Api\V1\LeaveTypeController;
 use App\Http\Controllers\Api\V1\NotificationController;
 use App\Http\Controllers\Api\V1\PermissionRequestController;
+use App\Http\Controllers\Api\V1\ProfileController;
 use App\Http\Controllers\Api\V1\ProjectController;
 use App\Http\Controllers\Api\V1\SuperAdminController;
 use Illuminate\Support\Facades\Route;
@@ -22,12 +24,14 @@ use Illuminate\Support\Facades\Route;
 Route::prefix('v1')->group(function () {
     // ─── Public Auth Routes ───────────────────────────────────────────────
     Route::prefix('auth')->group(function () {
-        Route::post('/register-company', [AuthController::class, 'registerCompany']);
+        // Phase 3.3: unrestricted public company registration was removed. Companies are provisioned by the
+        // trusted operator command (php artisan tenant:provision).
         Route::post('/login', [AuthController::class, 'login']);
 
         Route::middleware(['auth:sanctum', 'tenant'])->group(function () {
-            Route::post('/logout', [AuthController::class, 'logout']);
-            Route::get('/me', [AuthController::class, 'me']);
+            Route::post('/logout', [AuthController::class, 'logout'])->name('auth.logout');
+            Route::get('/me', [AuthController::class, 'me'])->name('auth.me');
+            Route::post('/change-password', [ProfileController::class, 'changePassword'])->middleware('throttle:password')->name('auth.change-password');
         });
     });
 
@@ -37,6 +41,30 @@ Route::prefix('v1')->group(function () {
         Route::apiResource('departments', DepartmentController::class);
         Route::apiResource('job-titles', JobTitleController::class);
         Route::apiResource('employees', EmployeeController::class);
+
+        // Phase 3.3 — employee lifecycle and login-account lifecycle
+        Route::post('employees/{employee}/terminate', [EmployeeController::class, 'terminate'])->whereNumber('employee');
+        Route::post('employees/{employee}/reactivate', [EmployeeController::class, 'reactivate'])->whereNumber('employee');
+        Route::get('employees/{employee}/picture', [ProfileController::class, 'employeePicture'])->whereNumber('employee');
+        Route::prefix('employees/{employee}/account')->whereNumber('employee')->group(function () {
+            Route::get('/', [AccountController::class, 'show']);
+            Route::post('/', [AccountController::class, 'store'])->middleware('throttle:account-admin');
+            Route::get('link-candidates', [AccountController::class, 'linkCandidates'])->middleware('throttle:account-admin');
+            Route::post('link', [AccountController::class, 'link'])->middleware('throttle:account-admin');
+            Route::post('unlink', [AccountController::class, 'unlink'])->middleware('throttle:account-admin');
+            Route::post('reset-password', [AccountController::class, 'resetPassword'])->middleware('throttle:account-admin');
+            Route::post('deactivate', [AccountController::class, 'deactivate'])->middleware('throttle:account-admin');
+            Route::post('reactivate', [AccountController::class, 'reactivate'])->middleware('throttle:account-admin');
+        });
+
+        // Phase 3.3 — My Profile (self-service; phone and picture only)
+        Route::prefix('me/profile')->group(function () {
+            Route::get('/', [ProfileController::class, 'show']);
+            Route::put('/', [ProfileController::class, 'update']);
+            Route::post('picture', [ProfileController::class, 'uploadPicture']);
+            Route::delete('picture', [ProfileController::class, 'removePicture']);
+            Route::get('picture', [ProfileController::class, 'ownPicture']);
+        });
 
         // Phase 8 — Work Schedule & Holidays
         Route::get('work-schedule', [CompanyWorkScheduleController::class, 'show']);
@@ -99,8 +127,9 @@ Route::prefix('v1')->group(function () {
             Route::put('users/{user}/roles', [AccessUserController::class, 'syncRoles'])->whereNumber('user');
         });
 
-        // Phase 8 — Audit Logs (requires audit_logs.view)
+        // Phase 8 — Audit Logs (audit_logs.view = everything; audit_logs.view_operational = operational events only)
         Route::get('audit-logs', [AuditLogController::class, 'index']);
+        Route::get('audit-logs/{auditLog}', [AuditLogController::class, 'show'])->whereNumber('auditLog');
     });
 
     // ─── Super Admin Routes (system-level, no tenant middleware) ─────────

@@ -12,24 +12,28 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
 
-test('public registration with the former privileged email cannot grant system privileges', function () {
-    $response = $this->postJson('/api/v1/auth/register-company', [
+test('the former privileged email gets no system privilege and public registration is gone', function () {
+    $this->postJson('/api/v1/auth/register-company', [
         'company_name' => 'Regression tenant',
         'name' => 'Untrusted registrant',
         'email' => 'superadmin@orbit.test',
         'password' => bin2hex(random_bytes(16)),
         'is_super_admin' => true,
         'role' => 'admin',
-    ])->assertCreated();
+    ])->assertStatus(404);
+    expect(User::withoutGlobalScopes()->where('email', 'superadmin@orbit.test')->exists())->toBeFalse();
 
+    // Trusted operator provisioning of the same email never sets the platform flag either.
+    $this->artisan('tenant:provision', ['--name' => 'Regression tenant', '--admin-name' => 'Operator Chosen', '--admin-email' => 'superadmin@orbit.test', '--reason' => 'regression test provisioning'])->assertSuccessful();
     $user = User::withoutGlobalScopes()->where('email', 'superadmin@orbit.test')->firstOrFail();
     expect($user->is_super_admin)->toBeFalse()
-        ->and($user->isSuperAdmin())->toBeFalse()
-        ->and($user->role)->toBe(UserRole::Owner);
+        ->and($user->isSuperAdmin())->toBeFalse();
 
-    $this->withToken($response->json('token'))->getJson('/api/v1/super-admin/tenants')->assertForbidden();
+    $token = $user->createToken('t')->plainTextToken;
+    $user->forceFill(['must_change_password' => false])->save();
+    $this->withToken($token)->getJson('/api/v1/super-admin/tenants')->assertForbidden();
     $this->app['auth']->forgetGuards();
-    $this->withToken($response->json('token'))->postJson('/api/v1/super-admin/override-workflow', [
+    $this->withToken($token)->postJson('/api/v1/super-admin/override-workflow', [
         'workflow_id' => 1, 'decision' => 'approve',
     ])->assertForbidden();
 });
@@ -121,7 +125,8 @@ test('tenant users cannot promote themselves or others through employee updates'
             'user' => ['is_super_admin' => true],
             'role' => 'owner',
         ]);
-        if ($role === UserRole::Employee) {
+        if ($role === UserRole::Employee || $employee->is($ownEmployee)) {
+            // Nobody edits their own official employment record through employee CRUD (Phase 3.3 FINAL-V2).
             $response->assertForbidden();
         } else {
             $response->assertOk();

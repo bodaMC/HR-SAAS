@@ -7,13 +7,20 @@ use App\Http\Requests\Api\V1\JobTitles\StoreJobTitleRequest;
 use App\Http\Requests\Api\V1\JobTitles\UpdateJobTitleRequest;
 use App\Http\Resources\Api\V1\JobTitleResource;
 use App\Models\JobTitle;
+use App\Services\Audit\AuditLogger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpFoundation\Response;
 
 class JobTitleController extends Controller
 {
+    private function audit(string $action, $model, ?array $old, ?array $new): void
+    {
+        app(AuditLogger::class)->log($action, $model, $old, $new);
+    }
+
     /**
      * Display a listing of job titles for the active company.
      */
@@ -37,7 +44,12 @@ class JobTitleController extends Controller
      */
     public function store(StoreJobTitleRequest $request): JsonResponse
     {
-        $jobTitle = JobTitle::create($request->validated());
+        $jobTitle = DB::transaction(function () use ($request) {
+            $m = JobTitle::create($request->validated());
+            $this->audit('job_title.created', $m, null, ['name' => $m->name]);
+
+            return $m;
+        });
 
         return (new JobTitleResource($jobTitle))
             ->response()
@@ -59,7 +71,11 @@ class JobTitleController extends Controller
      */
     public function update(UpdateJobTitleRequest $request, JobTitle $jobTitle): JobTitleResource
     {
-        $jobTitle->update($request->validated());
+        DB::transaction(function () use ($request, $jobTitle) {
+            $old = $jobTitle->only(array_keys($request->validated()));
+            $jobTitle->update($request->validated());
+            $this->audit('job_title.updated', $jobTitle, $old, $jobTitle->only(array_keys($request->validated())));
+        });
 
         return new JobTitleResource($jobTitle);
     }
@@ -71,7 +87,10 @@ class JobTitleController extends Controller
     {
         $this->authorize('delete', $jobTitle);
 
-        $jobTitle->delete();
+        DB::transaction(function () use ($jobTitle) {
+            $jobTitle->delete();
+            $this->audit('job_title.deleted', $jobTitle, ['name' => $jobTitle->name], null);
+        });
 
         return response()->json([
             'message' => 'Job title deleted successfully.',

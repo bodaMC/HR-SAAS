@@ -25,6 +25,19 @@ use Illuminate\Support\Str;
 
 uses(RefreshDatabase::class);
 
+const RB_OLD_HR_DELEGATES = [
+    'employees.view', 'employees.create', 'employees.update', 'employees.delete', 'employees.view_personal_data',
+    'departments.view', 'departments.create', 'departments.update', 'departments.delete',
+    'job_titles.view', 'job_titles.create', 'job_titles.update', 'job_titles.delete',
+    'roles.view', 'permissions.view',
+];
+const RB_OLD_HR_PERMS = [
+    'employees.view', 'employees.create', 'employees.update', 'employees.delete', 'employees.view_personal_data',
+    'departments.view', 'departments.create', 'departments.update', 'departments.delete',
+    'job_titles.view', 'job_titles.create', 'job_titles.update', 'job_titles.delete',
+    'roles.view', 'roles.create', 'roles.update', 'roles.delete', 'roles.assign', 'permissions.view', 'permissions.manage',
+];
+
 /** Create a user inside a company with an optional factory state; returns [user, token]. */
 function rb_user(Company $company, string $state = 'employee', array $attrs = []): array
 {
@@ -32,6 +45,7 @@ function rb_user(Company $company, string $state = 'employee', array $attrs = []
     $f = User::factory();
     $f = match ($state) {
         'hr' => $f->hr(),
+        'roleadmin' => $f,
         'owner' => $f->owner(),
         'admin' => $f->admin(),
         'sysadmin' => $f->systemAdmin(),
@@ -39,7 +53,14 @@ function rb_user(Company $company, string $state = 'employee', array $attrs = []
         'super' => $f,
         default => $f,
     };
-    $user = $f->create($attrs + ($state === 'hr' ? ['role' => UserRole::Employee] : []));
+    $user = $f->create($attrs + (in_array($state, ['hr', 'roleadmin'], true) ? ['role' => UserRole::Employee] : []));
+    if ($state === 'roleadmin') {
+        // Phase 3.3: HR is no longer a permission administrator. The RBAC mechanics tests below were written
+        // with the Phase 3.2 HR as the actor, so they now use a CUSTOM-role administrator carrying exactly
+        // the old HR permission set and the old delegation boundary. Assertions are unchanged.
+        app(RbacService::class)->ensureSystemRoles($company);
+        rb_custom_role($company, RB_OLD_HR_PERMS, RB_OLD_HR_DELEGATES, $user, 'Delegated Role Admin');
+    }
     if ($state === 'super') {
         $user->is_super_admin = true;
         $user->save();
@@ -110,19 +131,16 @@ test('legacy Owner and Admin account types hold no RBAC permission at all (no fa
     rb_call($this, $token, 'GET', '/api/v1/holidays')->assertOk();
 })->with(['owner', 'admin']);
 
-test('migration and registration never elevate: existing and new accounts have no user_roles and no HR permissions', function () {
+test('migration never elevates and public registration is gone: accounts have no user_roles and no HR permissions', function () {
     $company = Company::factory()->create();
     [$owner] = rb_user($company, 'owner');
     expect(DB::table('user_roles')->count())->toBe(0)
         ->and(PermissionResolver::for($owner))->not->toContain('employees.view');
 
-    $res = $this->postJson('/api/v1/auth/register-company', [
+    $this->postJson('/api/v1/auth/register-company', [
         'company_name' => 'NewCo', 'name' => 'Boss', 'email' => 'boss@newco.test', 'password' => 'Str0ng!Passw0rd#1', 'password_confirmation' => 'Str0ng!Passw0rd#1',
-    ]);
-    $res->assertStatus(201);
+    ])->assertStatus(404);
     expect(DB::table('user_roles')->count())->toBe(0);
-    $token = $res->json('token');
-    rb_call($this, $token, 'GET', '/api/v1/employees')->assertStatus(403);
 });
 
 test('HR administrator can manage employees, departments and job titles and sees personal data', function () {
@@ -168,7 +186,7 @@ test('self-service: an employee can read own record and personal data but not ot
 test('cross-tenant: HR of tenant A cannot see, edit or assign anything in tenant B', function () {
     $a = Company::factory()->create();
     $b = Company::factory()->create();
-    [, $tokenA] = rb_user($a, 'hr');
+    [, $tokenA] = rb_user($a, 'roleadmin');
     [$hrB] = rb_user($b, 'hr');
     [$plainB] = rb_user($b, 'employee');
     $roleB = rb_custom_role($b, ['employees.view'], [], null, 'BRole');
@@ -195,7 +213,7 @@ test('cross-tenant: HR of tenant A cannot see, edit or assign anything in tenant
 
 test('protected system role cannot be modified or deleted, even by HR', function () {
     $company = Company::factory()->create();
-    [, $token] = rb_user($company, 'hr');
+    [, $token] = rb_user($company, 'roleadmin');
     $hrRole = rb_hr_role_id($company);
     rb_call($this, $token, 'PUT', '/api/v1/access/roles/'.$hrRole, ['name' => 'Renamed'])->assertStatus(403)->assertJsonPath('code', 'role_protected');
     rb_call($this, $token, 'PUT', '/api/v1/access/roles/'.$hrRole, ['permissions' => ['employees.view']])->assertStatus(403);
@@ -204,7 +222,7 @@ test('protected system role cannot be modified or deleted, even by HR', function
 
 test('self-promotion is refused: HR cannot change its own assignments', function () {
     $company = Company::factory()->create();
-    [$hr, $token] = rb_user($company, 'hr');
+    [$hr, $token] = rb_user($company, 'roleadmin');
     $role = rb_custom_role($company, ['employees.view'], [], null, 'X');
     rb_call($this, $token, 'PUT', '/api/v1/access/users/'.$hr->id.'/roles', ['role_ids' => [rb_hr_role_id($company), $role->id]])->assertStatus(403)->assertJsonPath('code', 'self_assignment');
     rb_call($this, $token, 'PUT', '/api/v1/access/users/'.$hr->id.'/roles', ['role_ids' => []])->assertStatus(403);
@@ -212,7 +230,7 @@ test('self-promotion is refused: HR cannot change its own assignments', function
 
 test('HR cannot delegate role administration, protected administration, reserved financial or unknown permissions', function () {
     $company = Company::factory()->create();
-    [, $token] = rb_user($company, 'hr');
+    [, $token] = rb_user($company, 'roleadmin');
     foreach (['roles.assign', 'permissions.manage', 'roles.update'] as $p) {
         rb_call($this, $token, 'POST', '/api/v1/access/roles', ['name' => 'R '.$p, 'permissions' => [$p]])->assertStatus(403)->assertJsonPath('code', 'delegation_exceeded');
     }
@@ -245,7 +263,7 @@ test('indirect escalation: editing a role used to gain permissions, or stripping
 
 test('HR cannot strip or grant a role that carries more than its own delegation scope (bulk assignment included)', function () {
     $company = Company::factory()->create();
-    [$hr, $token] = rb_user($company, 'hr');
+    [$hr, $token] = rb_user($company, 'roleadmin');
     [$other] = rb_user($company, 'hr');   // second HR administrator (trusted bootstrap)
     $hrRole = rb_hr_role_id($company);
     rb_call($this, $token, 'PUT', '/api/v1/access/users/'.$other->id.'/roles', ['role_ids' => []])->assertStatus(403)->assertJsonPath('code', 'delegation_exceeded');
@@ -256,7 +274,7 @@ test('HR cannot strip or grant a role that carries more than its own delegation 
 
 test('HR can create a role inside its boundary, assign it, inspect effective permissions and remove it safely', function () {
     $company = Company::factory()->create();
-    [, $token] = rb_user($company, 'hr');
+    [, $token] = rb_user($company, 'roleadmin');
     [$plain] = rb_user($company, 'employee');
     $created = rb_call($this, $token, 'POST', '/api/v1/access/roles', ['name' => 'Dept Clerk', 'permissions' => ['departments.view', 'departments.create']])->assertCreated();
     $rid = $created->json('data.id');
@@ -274,7 +292,7 @@ test('HR can create a role inside its boundary, assign it, inspect effective per
 test('platform Super Admin has no implicit tenant permissions, is not listed or assignable, and cannot be created through role APIs', function () {
     $company = Company::factory()->create();
     [$super, $superToken] = rb_user($company, 'super', ['role' => UserRole::Owner]);
-    [, $hrToken] = rb_user($company, 'hr');
+    [, $hrToken] = rb_user($company, 'roleadmin');
     expect(PermissionResolver::for($super))->toBe([]);
     foreach (['/api/v1/employees', '/api/v1/departments', '/api/v1/access/roles', '/api/v1/audit-logs'] as $uri) {
         rb_call($this, $superToken, 'GET', $uri)->assertStatus(403);
@@ -343,7 +361,8 @@ test('/auth/me returns server-verified permissions, roles and no-store caching',
     $company = Company::factory()->create();
     [$hr, $token] = rb_user($company, 'hr');
     $res = rb_call($this, $token, 'GET', '/api/v1/auth/me')->assertOk();
-    expect($res->json('access.permissions'))->toContain('employees.view', 'roles.assign')
+    expect($res->json('access.permissions'))->toContain('employees.view', 'accounts.reset_password', 'audit_logs.view_operational')
+        ->and($res->json('access.permissions'))->not->toContain('roles.assign', 'roles.view', 'permissions.manage', 'permissions.view', 'audit_logs.view')
         ->and($res->json('access.roles.0.key'))->toBe('hr_administrator')
         ->and($res->json('access.is_platform_admin'))->toBeFalse()
         ->and($res->headers->get('Cache-Control'))->toContain('no-store');
@@ -383,7 +402,8 @@ test('last administrator: unassigning the only administrator through the API is 
 
 test('RBAC changes are audited with actor, tenant, previous and new state and no secrets', function () {
     $company = Company::factory()->create();
-    [$hr, $token] = rb_user($company, 'hr');
+    rb_user($company, 'hr');
+    [$hr, $token] = rb_user($company, 'roleadmin');
     [$plain] = rb_user($company, 'employee');
     $rid = rb_call($this, $token, 'POST', '/api/v1/access/roles', ['name' => 'Aud', 'permissions' => ['employees.view']])->assertCreated()->json('data.id');
     rb_call($this, $token, 'PUT', '/api/v1/access/roles/'.$rid, ['permissions' => ['employees.view', 'departments.view']])->assertOk();
@@ -420,7 +440,8 @@ test('bootstrap command: explicit, audited, refuses wrong tenant, platform and i
     expect(Artisan::call('rbac:bootstrap-hr', ['--company' => 'acme', '--email' => 'owner@acme.test']))->toBe(0);
     expect(Artisan::call('rbac:bootstrap-hr', ['--company' => (string) $a->id, '--email' => 'owner@acme.test']))->toBe(0); // idempotent
     PermissionResolver::flush();
-    expect(DB::table('user_roles')->count())->toBe(1)->and(PermissionResolver::for($owner->fresh()))->toContain('employees.view', 'roles.assign');
+    expect(DB::table('user_roles')->count())->toBe(1)->and(PermissionResolver::for($owner->fresh()))->toContain('employees.view', 'accounts.reset_password', 'audit_logs.view_operational')
+        ->and(PermissionResolver::for($owner->fresh()))->not->toContain('roles.assign', 'permissions.manage');
     expect(AuditLog::withoutGlobalScopes()->where('action', 'rbac.bootstrap_hr')->where('company_id', $a->id)->count())->toBe(1);
     // the existing tenant recovers management access with its own token after bootstrap
     $token = $owner->createToken('x')->plainTextToken;
@@ -443,8 +464,8 @@ test('rbac migration down removes only the new tables and leaves users intact; u
 test('role names are unique per tenant and the same name may exist in another tenant', function () {
     $a = Company::factory()->create();
     $b = Company::factory()->create();
-    [, $ta] = rb_user($a, 'hr');
-    [, $tb] = rb_user($b, 'hr');
+    [, $ta] = rb_user($a, 'roleadmin');
+    [, $tb] = rb_user($b, 'roleadmin');
     rb_call($this, $ta, 'POST', '/api/v1/access/roles', ['name' => 'Clerk'])->assertCreated();
     rb_call($this, $ta, 'POST', '/api/v1/access/roles', ['name' => 'Clerk'])->assertStatus(422);
     rb_call($this, $tb, 'POST', '/api/v1/access/roles', ['name' => 'Clerk'])->assertCreated();
@@ -465,7 +486,7 @@ test('dashboard-relevant: personal data and counts do not leak through restricte
 
 test('role name uniqueness is enforced inside the service lock, not only by request validation (race regression)', function () {
     $company = Company::factory()->create();
-    [$hr] = rb_user($company, 'hr');
+    [$hr] = rb_user($company, 'roleadmin');
     $svc = app(RbacService::class);
     app(TenantContext::class)->set($company);
     $svc->createRole($hr, ['name' => 'Clerk']);
@@ -478,7 +499,7 @@ test('role name uniqueness is enforced inside the service lock, not only by requ
 test('role names are unique per tenant case-insensitively, enforced by the service AND by a database unique index', function () {
     $company = Company::factory()->create();
     $other = Company::factory()->create();
-    [, $token] = rb_user($company, 'hr');
+    [, $token] = rb_user($company, 'roleadmin');
     rb_call($this, $token, 'POST', '/api/v1/access/roles', ['name' => 'Payroll Clerk'])->assertCreated();
     rb_call($this, $token, 'POST', '/api/v1/access/roles', ['name' => 'payroll clerk'])->assertStatus(422);
     // bypass the service entirely: the index itself must refuse a case-variant duplicate in the same tenant
@@ -513,7 +534,7 @@ test('TOCTOU: a permission revoked while a mutation waits for the tenant lock is
         'permissions.manage' => fn ($hr, $c) => $svc->createRole($hr, ['name' => 'With Perms', 'permissions' => ['employees.view']]),
     ] as $perm => $call) {
         $company = Company::factory()->create();
-        [$hr] = rb_user($company, 'hr');
+        [$hr] = rb_user($company, 'roleadmin');
         app(TenantContext::class)->set($company);
         rb_revoke_while_waiting($hr, $perm);
         expect($call)->not->toBeNull();
@@ -524,7 +545,7 @@ test('TOCTOU: a permission revoked while a mutation waits for the tenant lock is
 
     // metadata-only update (no permissions key): roles.update revoked
     $company = Company::factory()->create();
-    [$hr] = rb_user($company, 'hr');
+    [$hr] = rb_user($company, 'roleadmin');
     app(TenantContext::class)->set($company);
     $role = $svc->createRole($hr, ['name' => 'Editable']);
     PermissionResolver::flush();
@@ -535,7 +556,7 @@ test('TOCTOU: a permission revoked while a mutation waits for the tenant lock is
 
     // update with permissions: permissions.manage revoked though roles.update is still held
     $company = Company::factory()->create();
-    [$hr] = rb_user($company, 'hr');
+    [$hr] = rb_user($company, 'roleadmin');
     app(TenantContext::class)->set($company);
     $role = $svc->createRole($hr, ['name' => 'Editable']);
     PermissionResolver::flush();
@@ -546,7 +567,7 @@ test('TOCTOU: a permission revoked while a mutation waits for the tenant lock is
 
     // delete
     $company = Company::factory()->create();
-    [$hr] = rb_user($company, 'hr');
+    [$hr] = rb_user($company, 'roleadmin');
     app(TenantContext::class)->set($company);
     $role = $svc->createRole($hr, ['name' => 'Doomed']);
     PermissionResolver::flush();
@@ -557,7 +578,7 @@ test('TOCTOU: a permission revoked while a mutation waits for the tenant lock is
 
     // assignment
     $company = Company::factory()->create();
-    [$hr] = rb_user($company, 'hr');
+    [$hr] = rb_user($company, 'roleadmin');
     [$emp] = rb_user($company, 'employee');
     app(TenantContext::class)->set($company);
     $role = $svc->createRole($hr, ['name' => 'Viewer']);
@@ -570,7 +591,7 @@ test('TOCTOU: a permission revoked while a mutation waits for the tenant lock is
 
 test('TOCTOU: an actor deactivated while waiting for the lock is refused', function () {
     $company = Company::factory()->create();
-    [$hr] = rb_user($company, 'hr');
+    [$hr] = rb_user($company, 'roleadmin');
     app(TenantContext::class)->set($company);
     expect(PermissionResolver::has($hr, 'roles.create'))->toBeTrue();
     User::withoutGlobalScopes()->whereKey($hr->id)->update(['is_active' => false]);
@@ -578,7 +599,7 @@ test('TOCTOU: an actor deactivated while waiting for the lock is refused', funct
     app(TenantContext::class)->clear();
 });
 
-test('bootstrapped Owner and Admin hold exactly the HR Administrator permissions, no implicit protected administration', function (string $state) {
+test('bootstrapped Owner and Admin hold exactly the HR Administrator permissions, no RBAC administration and no full audit access', function (string $state) {
     $company = Company::factory()->create();
     [$user, $token] = rb_user($company, $state);
     // before bootstrap: nothing (no legacy fallback)
@@ -588,16 +609,17 @@ test('bootstrapped Owner and Admin hold exactly the HR Administrator permissions
     $hrPerms = DB::table('role_permissions')->where('role_id', rb_hr_role_id($company))->pluck('permission')->sort()->values()->all();
     expect(PermissionResolver::for($user->refresh()))->toBe($hrPerms);
     $me = rb_call($this, $token, 'GET', '/api/v1/auth/me')->assertOk()->json('access.permissions');
-    expect($me)->not->toContain('audit_logs.view')->not->toContain('company_settings.manage')->not->toContain('work_schedules.manage');
+    // Phase 3.3 revised matrix: operational administration yes; roles & permissions and the full audit trail no
+    expect($me)->toContain('company_settings.manage', 'work_schedules.manage', 'audit_logs.view_operational', 'approval_workflows.manage')
+        ->not->toContain('audit_logs.view')->not->toContain('roles.view')->not->toContain('roles.assign')->not->toContain('permissions.manage')->not->toContain('permissions.view');
     // the API is closed too, not only the navigation
-    rb_call($this, $token, 'GET', '/api/v1/audit-logs')->assertStatus(403);
-    rb_call($this, $token, 'PUT', '/api/v1/work-schedule', ['standard_daily_hours' => 8, 'work_start_time' => '09:00', 'work_end_time' => '17:00'])->assertStatus(403);
-    rb_call($this, $token, 'POST', '/api/v1/holidays', ['name' => 'X', 'start_date' => '2030-01-01', 'end_date' => '2030-01-01'])->assertStatus(403);
-    // ordinary read access to schedules and holidays stays
-    rb_call($this, $token, 'GET', '/api/v1/work-schedule')->assertSuccessful();
-    rb_call($this, $token, 'GET', '/api/v1/holidays')->assertOk();
-    // HR functions still work
-    rb_call($this, $token, 'GET', '/api/v1/access/roles')->assertOk();
+    foreach (['/api/v1/access/roles', '/api/v1/access/users'] as $uri) {
+        rb_call($this, $token, 'GET', $uri)->assertStatus(403);
+    }
+    rb_call($this, $token, 'POST', '/api/v1/access/roles', ['name' => 'Escalate', 'permissions' => ['employees.view']])->assertStatus(403);
+    rb_call($this, $token, 'GET', '/api/v1/audit-logs')->assertOk();
+    rb_call($this, $token, 'PUT', '/api/v1/work-schedule', ['standard_daily_hours' => 8, 'work_start_time' => '09:00', 'work_end_time' => '17:00'])->assertSuccessful();
+    rb_call($this, $token, 'POST', '/api/v1/holidays', ['name' => 'X', 'start_date' => '2030-01-01', 'end_date' => '2030-01-01'])->assertStatus(201);
 })->with(['owner', 'admin']);
 
 test('removing every role from a bootstrapped Owner or Admin leaves zero privileges, whatever the history', function (string $state) {
@@ -628,7 +650,7 @@ test('removing every role from a bootstrapped Owner or Admin leaves zero privile
 
 test('maximum-length English and Arabic role names create successfully with a bounded internal key', function () {
     $company = Company::factory()->create();
-    [, $token] = rb_user($company, 'hr');
+    [, $token] = rb_user($company, 'roleadmin');
     $en = str_repeat('Payroll Clerk ', 10);
     $en = mb_substr($en, 0, 100);
     $ar = mb_substr(str_repeat('مسؤول الرواتب ', 10), 0, 100);
@@ -636,14 +658,14 @@ test('maximum-length English and Arabic role names create successfully with a bo
         $r = rb_call($this, $token, 'POST', '/api/v1/access/roles', ['name' => $name, 'name_ar' => $ar])->assertCreated();
         expect(strlen($r->json('data.key')))->toBeLessThanOrEqual(80);
     }
-    expect(DB::table('roles')->where('company_id', $company->id)->where('key', 'like', 'custom_%')->distinct()->count('key'))->toBe(3);
+    expect(DB::table('roles')->where('company_id', $company->id)->where('key', 'like', 'custom_%')->where('name', '!=', 'Delegated Role Admin')->distinct()->count('key'))->toBe(3);
     rb_call($this, $token, 'POST', '/api/v1/access/roles', ['name' => str_repeat('x', 101)])->assertStatus(422);
 });
 
 test('access user directory: tenant-scoped server-side search and pagination with accurate totals', function () {
     $company = Company::factory()->create();
     $other = Company::factory()->create();
-    [, $token] = rb_user($company, 'hr');
+    [, $token] = rb_user($company, 'roleadmin');
     rb_user($other, 'employee', ['name' => 'Zed Outsider']);
     app(TenantContext::class)->set($company);
     User::factory()->count(59)->create();
@@ -684,7 +706,7 @@ test('super admin override is atomic with its audit record: an audit failure rol
 
     app()->bind(AuditLogger::class, fn () => new class extends AuditLogger
     {
-        public function log(string $action, ?Model $auditable = null, ?array $oldValues = null, ?array $newValues = null, ?User $user = null): ?AuditLog
+        public function log(string $action, ?Model $auditable = null, ?array $oldValues = null, ?array $newValues = null, ?User $user = null, ?string $reason = null, ?string $visibility = null): ?AuditLog
         {
             throw new RuntimeException('audit store unavailable');
         }
@@ -896,14 +918,21 @@ test('revoking the System Super Admin or an HR Administrator is lockout-protecte
     // reason is mandatory
     [$code] = rb_cmd('rbac:revoke-hr', ['--company' => 'acme-v3', '--email' => 'hr@example.test', '--reason' => 'no']);
     expect($code)->toBe(1)->and(DB::table('user_roles')->where('user_id', $hr->id)->exists())->toBeTrue();
-    // with HR present, the System Super Admin may be revoked; then the HR account remains the administrator
+    // Phase 3.3: HR is no longer a permission administrator, so with only HR accounts left the System Super Admin
+    // is still the last administrator and cannot be revoked (lockout protection follows the effective permissions).
+    [$code] = rb_cmd('rbac:revoke-system-admin', ['--company' => 'acme-v3', '--email' => 'sa@example.test', '--reason' => RB_REASON]);
+    expect($code)->toBe(1)->and(DB::table('user_roles')->where('user_id', $sa->id)->exists())->toBeTrue();
+    // once an explicitly designated custom-role administrator exists, the System Super Admin may be revoked
+    [$custom] = rb_user($company, 'employee', ['email' => 'custom.admin@example.test']);
+    rb_custom_role($company, ['roles.assign', 'permissions.manage'], [], $custom, 'Designated Admin');
     [$code] = rb_cmd('rbac:revoke-system-admin', ['--company' => 'acme-v3', '--email' => 'sa@example.test', '--reason' => RB_REASON]);
     expect($code)->toBe(0);
     PermissionResolver::flush();
     expect(PermissionResolver::for($sa->refresh()))->toBe([]);
-    // now HR is the last permission administrator: its revocation is refused
+    // the designated administrator is now the last one: removing its role through the operator path is not possible
+    // for HR accounts (they do not count), and revoking an HR account never affects lockout protection
     [$code] = rb_cmd('rbac:revoke-hr', ['--company' => 'acme-v3', '--email' => 'hr@example.test', '--reason' => RB_REASON]);
-    expect($code)->toBe(1)->and(DB::table('user_roles')->where('user_id', $hr->id)->exists())->toBeTrue();
+    expect($code)->toBe(0)->and(DB::table('user_roles')->where('user_id', $hr->id)->exists())->toBeFalse();
 });
 
 test('audit failure during a trusted procedure rolls the change back', function () {
@@ -911,7 +940,7 @@ test('audit failure during a trusted procedure rolls the change back', function 
     [$user] = rb_user($company, 'owner', ['email' => 'dev@example.test']);
     $this->app->bind(AuditLogger::class, fn () => new class extends AuditLogger
     {
-        public function log(string $action, ?Model $auditable = null, ?array $oldValues = null, ?array $newValues = null, ?User $user = null): ?AuditLog
+        public function log(string $action, ?Model $auditable = null, ?array $oldValues = null, ?array $newValues = null, ?User $user = null, ?string $reason = null, ?string $visibility = null): ?AuditLog
         {
             return null;
         }

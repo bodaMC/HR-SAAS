@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Api\V1\Employees;
 
 use App\Enums\EmploymentStatus;
+use App\Enums\EmploymentType;
 use App\Enums\Gender;
 use App\Models\Employee;
 use App\Rules\ValidNationalId;
@@ -101,16 +102,10 @@ class UpdateEmployeeRequest extends FormRequest
                     ->where('company_id', $tenantId)
                     ->whereNull('deleted_at'),
             ],
-            'user_id' => [
-                'nullable',
-                'integer',
-                Rule::exists('users', 'id')
-                    ->where('company_id', $tenantId)
-                    ->whereNull('deleted_at'),
-                Rule::unique('employees', 'user_id')
-                    ->where('company_id', $tenantId)
-                    ->ignore($employee),
-            ],
+            // Phase 3.3: the employee-account link is never client-controlled through employee CRUD.
+            'user_id' => ['prohibited'],
+            'employment_type' => ['nullable', Rule::in(EmploymentType::values())],
+            'is_trainee' => ['nullable', 'boolean'],
         ];
     }
 }

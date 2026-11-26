@@ -28,6 +28,7 @@ class AuditLogResource extends JsonResource
             }),
             'old_values' => $this->old_values,
             'new_values' => $this->new_values,
+            'reason' => $this->reason,
             'ip_address' => $this->ip_address,
             'user_agent' => $this->user_agent,
             'created_at' => $this->created_at?->toISOString(),
