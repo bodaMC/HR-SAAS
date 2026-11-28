@@ -7,6 +7,7 @@ use App\Http\Requests\Api\V1\Departments\StoreDepartmentRequest;
 use App\Http\Requests\Api\V1\Departments\UpdateDepartmentRequest;
 use App\Http\Resources\Api\V1\DepartmentResource;
 use App\Models\Department;
+use App\Organization\OrgService;
 use App\Services\Audit\AuditLogger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -88,6 +89,8 @@ class DepartmentController extends Controller
         $this->authorize('delete', $department);
 
         DB::transaction(function () use ($department) {
+            // Phase 3.4 F03: same tenant lock as organization writes; refuses while active positions use this department.
+            app(OrgService::class)->assertDepartmentDeletable((int) $department->company_id, (int) $department->id);
             $department->delete();
             $this->audit('department.deleted', $department, ['name' => $department->name], null);
         });

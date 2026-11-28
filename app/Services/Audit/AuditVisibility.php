@@ -27,6 +27,9 @@ final class AuditVisibility
         'job_title.created', 'job_title.updated', 'job_title.deleted',
         'account.created', 'account.linked', 'account.unlinked', 'account.password_reset',
         'account.activated', 'account.deactivated',
+        'org.position.created', 'org.position.updated', 'org.position.archived', 'org.position.restored', 'org.position.removed', 'org.position.reparented',
+        'org.assignment.created', 'org.assignment.ended', 'org.assignment.expired', 'org.assignment.placement_set',
+        'org.assignment.voided', 'org.assignment.reinstated', 'org.assignment.replaced',
     ];
 
     public static function for(string $action): string

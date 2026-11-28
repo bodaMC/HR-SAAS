@@ -9,12 +9,14 @@ use App\Http\Controllers\Api\V1\CompanyHolidayController;
 use App\Http\Controllers\Api\V1\CompanyWorkScheduleController;
 use App\Http\Controllers\Api\V1\CompensatoryTimeController;
 use App\Http\Controllers\Api\V1\DepartmentController;
+use App\Http\Controllers\Api\V1\EligibilityController;
 use App\Http\Controllers\Api\V1\EmployeeController;
 use App\Http\Controllers\Api\V1\JobTitleController;
 use App\Http\Controllers\Api\V1\LeaveAllocationController;
 use App\Http\Controllers\Api\V1\LeaveRequestController;
 use App\Http\Controllers\Api\V1\LeaveTypeController;
 use App\Http\Controllers\Api\V1\NotificationController;
+use App\Http\Controllers\Api\V1\OrganizationController;
 use App\Http\Controllers\Api\V1\PermissionRequestController;
 use App\Http\Controllers\Api\V1\ProfileController;
 use App\Http\Controllers\Api\V1\ProjectController;
@@ -39,7 +41,13 @@ Route::prefix('v1')->group(function () {
     Route::middleware(['auth:sanctum', 'tenant'])->group(function () {
         // Phase 7 — Core HR Entities
         Route::apiResource('departments', DepartmentController::class);
+        Route::get('job-titles/eligible', [EligibilityController::class, 'jobTitlesFor']);
+        Route::get('job-titles/compatibility-report', [EligibilityController::class, 'jobTitleReport']);
         Route::apiResource('job-titles', JobTitleController::class);
+        Route::get('employees/manager-candidates', [EligibilityController::class, 'managerCandidates']);
+        Route::get('employees/manager-compatibility-report', [EligibilityController::class, 'managerReport']);
+        Route::get('employees/{employee}/manager-scope', [EligibilityController::class, 'showScope'])->whereNumber('employee');
+        Route::put('employees/{employee}/manager-scope', [EligibilityController::class, 'setScope'])->whereNumber('employee')->middleware('throttle:account-admin');
         Route::apiResource('employees', EmployeeController::class);
 
         // Phase 3.3 — employee lifecycle and login-account lifecycle
@@ -56,6 +64,35 @@ Route::prefix('v1')->group(function () {
             Route::post('deactivate', [AccountController::class, 'deactivate'])->middleware('throttle:account-admin');
             Route::post('reactivate', [AccountController::class, 'reactivate'])->middleware('throttle:account-admin');
         });
+
+        // Phase 3.4 — organizational structure (reads: any current employee; writes: explicit permissions)
+        Route::prefix('organization')->group(function () {
+            Route::get('chart', [OrganizationController::class, 'chart']);
+            Route::get('people/{employee}', [OrganizationController::class, 'person'])->whereNumber('employee');
+            Route::get('employees/{employee}/picture', [OrganizationController::class, 'picture'])->whereNumber('employee');
+            Route::get('departments/{department}/members', [OrganizationController::class, 'departmentMembers'])->whereNumber('department');
+            Route::get('eligible-employees', [OrganizationController::class, 'eligibleEmployees']);
+            Route::get('unassigned', [OrganizationController::class, 'unassigned']);
+            Route::get('people-without-position', [OrganizationController::class, 'peopleWithoutPosition']);
+            Route::get('positions', [OrganizationController::class, 'positions']);
+            Route::post('positions', [OrganizationController::class, 'store'])->middleware('throttle:account-admin');
+            Route::get('positions/{position}', [OrganizationController::class, 'show'])->whereNumber('position');
+            Route::put('positions/{position}', [OrganizationController::class, 'update'])->whereNumber('position')->middleware('throttle:account-admin');
+            Route::get('positions/{position}/history', [OrganizationController::class, 'history'])->whereNumber('position');
+            Route::get('positions/{position}/removal-preview', [OrganizationController::class, 'removalPreview'])->whereNumber('position');
+            Route::post('positions/{position}/delete', [OrganizationController::class, 'destroy'])->whereNumber('position')->middleware('throttle:account-admin');
+            Route::post('positions/{position}/archive', [OrganizationController::class, 'archive'])->whereNumber('position')->middleware('throttle:account-admin');
+            Route::post('positions/{position}/restore', [OrganizationController::class, 'restore'])->whereNumber('position')->middleware('throttle:account-admin');
+            Route::post('positions/{position}/reparent', [OrganizationController::class, 'reparent'])->whereNumber('position')->middleware('throttle:account-admin');
+            Route::post('positions/{position}/assignments', [OrganizationController::class, 'assign'])->whereNumber('position')->middleware('throttle:account-admin');
+            Route::post('assignments/{assignment}/end', [OrganizationController::class, 'endAssignment'])->whereNumber('assignment')->middleware('throttle:account-admin');
+            Route::post('assignments/{assignment}/void', [OrganizationController::class, 'voidAssignment'])->whereNumber('assignment')->middleware('throttle:account-admin');
+            Route::post('assignments/{assignment}/reinstate', [OrganizationController::class, 'reinstateAssignment'])->whereNumber('assignment')->middleware('throttle:account-admin');
+            Route::post('assignments/{assignment}/replace', [OrganizationController::class, 'replaceAssignment'])->whereNumber('assignment')->middleware('throttle:account-admin');
+            Route::post('assignments/{assignment}/placement', [OrganizationController::class, 'placement'])->whereNumber('assignment')->middleware('throttle:account-admin');
+        });
+        Route::get('employees/{employee}/organization', [OrganizationController::class, 'employeeOrganization'])->whereNumber('employee');
+        Route::get('me/organization', [OrganizationController::class, 'myOrganization']);
 
         // Phase 3.3 — My Profile (self-service; phone and picture only)
         Route::prefix('me/profile')->group(function () {

@@ -9,7 +9,9 @@ use App\Http\Requests\Api\V1\Employees\IndexEmployeesRequest;
 use App\Http\Requests\Api\V1\Employees\StoreEmployeeRequest;
 use App\Http\Requests\Api\V1\Employees\UpdateEmployeeRequest;
 use App\Http\Resources\Api\V1\EmployeeResource;
+use App\Models\Company;
 use App\Models\Employee;
+use App\Organization\EmployeeEligibility;
 use App\Services\Audit\AuditLogger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -92,6 +94,11 @@ class EmployeeController extends Controller
             $data['is_trainee'] = (bool) $data['is_trainee'];
         }
         $employee = DB::transaction(function () use ($data, $request) {
+            Company::withoutGlobalScopes()->whereKey((int) request()->user()->company_id)->lockForUpdate()->first(); // tenant lock first: same order as every organization and lifecycle mutation
+            $elig = app(EmployeeEligibility::class);
+            $cid = (int) $request->user()->company_id;
+            $elig->assertJobTitle($cid, $data['job_title_id'] ?? null, $data['department_id'] ?? null);
+            $elig->assertManager($cid, null, $data['manager_id'] ?? null, $data['department_id'] ?? null);
             $employee = Employee::create($data);
             $this->audit->log('employee.created', $employee, null, ['employee_number' => $employee->employee_number, 'employment_status' => $employee->employment_status->value], $request->user());
 

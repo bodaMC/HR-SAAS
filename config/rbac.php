@@ -44,6 +44,12 @@ return [
             'accounts.deactivate',
             'accounts.reset_password',
         ],
+        'organization' => [
+            'organization.positions.manage',
+            'organization.assignments.manage',
+            'organization.reporting.manage',
+            'organization.history.view',
+        ],
         'roles' => [
             'roles.view',
             'roles.create',
@@ -95,6 +101,7 @@ return [
                 'employees.view', 'employees.create', 'employees.update', 'employees.delete', 'employees.view_personal_data',
                 'departments.view', 'departments.create', 'departments.update', 'departments.delete',
                 'job_titles.view', 'job_titles.create', 'job_titles.update', 'job_titles.delete',
+                'organization.positions.manage', 'organization.assignments.manage', 'organization.reporting.manage', 'organization.history.view',
                 'accounts.view', 'accounts.create', 'accounts.link', 'accounts.activate', 'accounts.deactivate', 'accounts.reset_password',
                 'work_schedules.manage', 'company_settings.manage', 'approval_workflows.manage', 'audit_logs.view_operational',
             ],

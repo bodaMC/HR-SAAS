@@ -7,6 +7,8 @@ use App\Enums\UserRole;
 use App\Models\Company;
 use App\Models\Employee;
 use App\Models\User;
+use App\Organization\EmployeeEligibility;
+use App\Organization\OrgService;
 use App\Rbac\PermissionResolver;
 use App\Rbac\RbacDenied;
 use App\Rbac\RbacService;
@@ -445,6 +447,18 @@ class AccountService
             }
             unset($data['termination_date'], $data['user_id']);
             $this->assertEmployeeMutable($actor, $employee);
+            // FINAL-V3: job title and manager must suit the RESULTING department. Only a changed title, manager or department is re-checked, so
+            // an unrelated edit never fails because of older data (those rows are listed by the compatibility reports instead).
+            $newDept = array_key_exists('department_id', $data) ? $data['department_id'] : $employee->department_id;
+            $newTitle = array_key_exists('job_title_id', $data) ? $data['job_title_id'] : $employee->job_title_id;
+            $newMgr = array_key_exists('manager_id', $data) ? $data['manager_id'] : $employee->manager_id;
+            $elig = app(EmployeeEligibility::class);
+            if ($newDept !== $employee->department_id || $newTitle !== $employee->job_title_id) {
+                $elig->assertJobTitle((int) $actor->company_id, $newTitle, $newDept);
+            }
+            if ($newDept !== $employee->department_id || $newMgr !== $employee->manager_id) {
+                $elig->assertManager((int) $actor->company_id, $employee->id, $newMgr, $newDept);
+            }
             $before = $employee->only(array_keys($data));
             $employee->update($data);
             $this->auditOrFail('employee.updated', $employee, $before, $employee->only(array_keys($data)), $actor);
@@ -550,9 +564,11 @@ class AccountService
             if ($user) {
                 $this->rbac->assertAdministratorRemains($actor->company_id);
             }
+            // Phase 3.4: live organizational assignments end with the employment (history is kept, positions stay and show as vacant).
+            $assignmentsEnded = app(OrgService::class)->endForEmployee($actor, $employee, 'employee_terminated', $employee->termination_date->toDateString(), $reason);
             $this->auditOrFail('employee.terminated', $employee, $before, [
                 'employment_status' => 'terminated', 'termination_date' => $employee->termination_date->toDateString(),
-                'account_deactivated' => $deactivated, 'sessions_revoked' => $user !== null,
+                'account_deactivated' => $deactivated, 'sessions_revoked' => $user !== null, 'org_assignments_ended' => $assignmentsEnded,
             ], $actor, $reason);
             if ($deactivated) {
                 $this->auditOrFail('account.deactivated', $user, ['is_active' => true], ['is_active' => false, 'sessions_revoked' => true, 'cause' => 'employee_terminated', 'employee_id' => $employee->id], $actor, $reason, $this->vis('account.deactivated', $user));
@@ -605,8 +621,9 @@ class AccountService
                 $this->rbac->assertAdministratorRemains($actor->company_id);
             }
             $old = ['employee_number' => $employee->employee_number, 'employment_status' => $employee->employment_status->value];
+            $assignmentsEnded = app(OrgService::class)->endForEmployee($actor, $employee, 'employee_deleted', OrgService::today($actor->company_id), null);
             $employee->delete();
-            $this->auditOrFail('employee.deleted', $employee, $old, ['account_deactivated' => $deactivated, 'sessions_revoked' => $user !== null], $actor);
+            $this->auditOrFail('employee.deleted', $employee, $old, ['account_deactivated' => $deactivated, 'sessions_revoked' => $user !== null, 'org_assignments_ended' => $assignmentsEnded], $actor);
             if ($deactivated) {
                 $this->auditOrFail('account.deactivated', $user, ['is_active' => true], ['is_active' => false, 'sessions_revoked' => true, 'cause' => 'employee_deleted', 'employee_id' => $employee->id], $actor, null, $this->vis('account.deactivated', $user));
             }

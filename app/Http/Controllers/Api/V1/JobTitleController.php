@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\JobTitles\StoreJobTitleRequest;
 use App\Http\Requests\Api\V1\JobTitles\UpdateJobTitleRequest;
 use App\Http\Resources\Api\V1\JobTitleResource;
+use App\Models\Company;
 use App\Models\JobTitle;
 use App\Services\Audit\AuditLogger;
 use Illuminate\Http\JsonResponse;
@@ -19,6 +20,26 @@ class JobTitleController extends Controller
     private function audit(string $action, $model, ?array $old, ?array $new): void
     {
         app(AuditLogger::class)->log($action, $model, $old, $new);
+    }
+
+    private function deptIds(JobTitle $t): array
+    {
+        return DB::table('job_title_departments')->where('job_title_id', $t->id)->orderBy('department_id')->pluck('department_id')->map(fn ($x) => (int) $x)->all();
+    }
+
+    /** Selected departments are replaced as a set; an 'all' title keeps no rows. Runs inside the caller's transaction. */
+    private function syncDepartments(JobTitle $t, array $v): void
+    {
+        if (! array_key_exists('department_availability', $v) && ! array_key_exists('department_ids', $v)) {
+            return;
+        }
+        $mode = $t->department_availability;
+        DB::table('job_title_departments')->where('job_title_id', $t->id)->delete();
+        if ($mode === 'selected') {
+            foreach (array_unique($v['department_ids'] ?? []) as $d) {
+                DB::table('job_title_departments')->insert(['company_id' => $t->company_id, 'job_title_id' => $t->id, 'department_id' => $d, 'created_at' => now(), 'updated_at' => now()]);
+            }
+        }
     }
 
     /**
@@ -45,7 +66,10 @@ class JobTitleController extends Controller
     public function store(StoreJobTitleRequest $request): JsonResponse
     {
         $jobTitle = DB::transaction(function () use ($request) {
-            $m = JobTitle::create($request->validated());
+            Company::withoutGlobalScopes()->whereKey((int) request()->user()->company_id)->lockForUpdate()->first(); // tenant lock first: same order as every organization and lifecycle mutation
+            $v = $request->validated();
+            $m = JobTitle::create(collect($v)->except('department_ids')->all());
+            $this->syncDepartments($m, $v);
             $this->audit('job_title.created', $m, null, ['name' => $m->name]);
 
             return $m;
@@ -72,9 +96,13 @@ class JobTitleController extends Controller
     public function update(UpdateJobTitleRequest $request, JobTitle $jobTitle): JobTitleResource
     {
         DB::transaction(function () use ($request, $jobTitle) {
-            $old = $jobTitle->only(array_keys($request->validated()));
-            $jobTitle->update($request->validated());
-            $this->audit('job_title.updated', $jobTitle, $old, $jobTitle->only(array_keys($request->validated())));
+            Company::withoutGlobalScopes()->whereKey((int) request()->user()->company_id)->lockForUpdate()->first(); // tenant lock first: same order as every organization and lifecycle mutation
+            $v = $request->validated();
+            JobTitle::query()->whereKey($jobTitle->id)->lockForUpdate()->first();
+            $old = $jobTitle->only(array_keys($v)) + ['department_ids' => $this->deptIds($jobTitle)];
+            $jobTitle->update(collect($v)->except('department_ids')->all());
+            $this->syncDepartments($jobTitle, $v);
+            $this->audit('job_title.updated', $jobTitle, $old, $jobTitle->only(array_keys($v)) + ['department_ids' => $this->deptIds($jobTitle)]);
         });
 
         return new JobTitleResource($jobTitle);

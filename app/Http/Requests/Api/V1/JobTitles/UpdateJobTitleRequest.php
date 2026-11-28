@@ -41,6 +41,9 @@ class UpdateJobTitleRequest extends FormRequest
             ],
             'description' => ['nullable', 'string', 'max:1000'],
             'is_active' => ['nullable', 'boolean'],
+            'department_availability' => ['nullable', Rule::in(['all', 'selected'])],
+            'department_ids' => ['nullable', 'array', 'max:200', 'required_if:department_availability,selected'],
+            'department_ids.*' => ['integer', Rule::exists('departments', 'id')->where('company_id', $tenantId)->whereNull('deleted_at')],
         ];
     }
 }

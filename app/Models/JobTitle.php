@@ -28,6 +28,7 @@ class JobTitle extends Model
         'name',
         'description',
         'is_active',
+        'department_availability',
     ];
 
     /**
